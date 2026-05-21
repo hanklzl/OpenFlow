@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OpenFlow</string>
+    <string name="accessibility_service_description">检测可编辑文本框获得焦点，在其上方显示 OpenFlow 悬浮球。长按悬浮球开始离线语音识别，识别结果会被写入当前输入框。</string>
+    <string name="accessibility_service_summary">在输入框旁显示 OpenFlow 语音输入悬浮球</string>
+</resources>
