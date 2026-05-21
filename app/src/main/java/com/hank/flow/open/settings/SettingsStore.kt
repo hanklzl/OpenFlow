@@ -1,0 +1,66 @@
+package com.hank.flow.open.settings
+
+import android.content.Context
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.hank.flow.open.model.ModelCatalog
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+
+private val Context.dataStore by preferencesDataStore(name = "openflow_settings")
+
+data class FlowSettings(
+    val polishEnabled: Boolean,
+    val swipeUpCancelEnabled: Boolean,
+    val waveformEnabled: Boolean,
+    val editBeforeInsertEnabled: Boolean,
+    val whisperModelId: String,
+    val llmModelId: String,
+    val mirrorBase: String,
+)
+
+class SettingsStore(private val context: Context) {
+
+    val flow: Flow<FlowSettings> = context.dataStore.data.map { it.toSettings() }
+
+    suspend fun current(): FlowSettings = flow.first()
+
+    suspend fun setPolishEnabled(enabled: Boolean) = update { it[K_POLISH] = enabled }
+    suspend fun setSwipeUpCancel(enabled: Boolean) = update { it[K_SWIPE_CANCEL] = enabled }
+    suspend fun setWaveform(enabled: Boolean) = update { it[K_WAVEFORM] = enabled }
+    suspend fun setEditBeforeInsert(enabled: Boolean) = update { it[K_EDIT_BEFORE] = enabled }
+    suspend fun setWhisperModelId(id: String) = update { it[K_WHISPER_ID] = id }
+    suspend fun setLlmModelId(id: String) = update { it[K_LLM_ID] = id }
+    suspend fun setMirrorBase(url: String) = update { it[K_MIRROR_BASE] = url }
+
+    private suspend fun update(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
+        context.dataStore.edit(block)
+    }
+
+    private fun Preferences.toSettings(): FlowSettings = FlowSettings(
+        polishEnabled = this[K_POLISH] ?: true,
+        swipeUpCancelEnabled = this[K_SWIPE_CANCEL] ?: true,
+        waveformEnabled = this[K_WAVEFORM] ?: true,
+        editBeforeInsertEnabled = this[K_EDIT_BEFORE] ?: false,
+        whisperModelId = this[K_WHISPER_ID] ?: ModelCatalog.whisperDefault.id,
+        llmModelId = this[K_LLM_ID] ?: ModelCatalog.llmDefault.id,
+        mirrorBase = this[K_MIRROR_BASE] ?: DEFAULT_MIRROR,
+    )
+
+    companion object {
+        const val DEFAULT_MIRROR = "https://huggingface.co"
+        const val ALT_MIRROR = "https://hf-mirror.com"
+
+        private val K_POLISH = booleanPreferencesKey("polish_enabled")
+        private val K_SWIPE_CANCEL = booleanPreferencesKey("swipe_cancel")
+        private val K_WAVEFORM = booleanPreferencesKey("waveform")
+        private val K_EDIT_BEFORE = booleanPreferencesKey("edit_before_insert")
+        private val K_WHISPER_ID = stringPreferencesKey("whisper_model_id")
+        private val K_LLM_ID = stringPreferencesKey("llm_model_id")
+        private val K_MIRROR_BASE = stringPreferencesKey("mirror_base")
+    }
+}

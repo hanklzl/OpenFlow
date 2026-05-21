@@ -11,8 +11,13 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
 import com.hank.flow.open.insertion.TextInserter
+import com.hank.flow.open.llm.PolishEngine
+import com.hank.flow.open.model.ModelCatalog
+import com.hank.flow.open.model.ModelStore
+import com.hank.flow.open.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,10 +26,10 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service (type=microphone) that owns AudioRecord lifetime and
- * orchestrates record → ASR → polish → insert pipeline.
+ * Foreground service (type=microphone) that owns the audio + ASR + polish + insert pipeline.
  *
- * Step D: ASR/polish are stubbed; on commit we just insert a fixed string.
+ * Lifecycle: a single FGS instance starts on ACTION_START (long-press), keeps recording
+ * until ACTION_COMMIT or ACTION_CANCEL, then runs the pipeline and stops itself.
  */
 class RecordingForegroundService : Service() {
 
@@ -32,6 +37,12 @@ class RecordingForegroundService : Service() {
     private val recorder = AudioRecorder()
     private var captureJob: Job? = null
     private var capturing = false
+
+    private val settingsStore by lazy { SettingsStore(applicationContext) }
+    private val modelStore by lazy { ModelStore(applicationContext) }
+
+    private var whisperEngine: WhisperEngine? = null
+    private var polishEngine: PolishEngine? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,8 +77,10 @@ class RecordingForegroundService : Service() {
         captureJob = scope.launch {
             val pcm = recorder.stop()
             capturing = false
-            val recognized = stubTranscribe(pcm)
-            insertIntoFocusedEditable(recognized)
+            val settings = settingsStore.current()
+            val raw = transcribe(pcm)
+            val finalText = if (settings.polishEnabled) polish(raw, settings.llmModelId) else raw
+            if (finalText.isNotBlank()) insertIntoFocusedEditable(finalText)
             stopSelfSafely()
         }
     }
@@ -80,6 +93,31 @@ class RecordingForegroundService : Service() {
         stopSelfSafely()
     }
 
+    private suspend fun transcribe(pcm: ShortArray): String {
+        if (pcm.isEmpty()) return ""
+        val settings = settingsStore.current()
+        val model = ModelCatalog.byId(settings.whisperModelId) ?: ModelCatalog.whisperDefault
+        if (!modelStore.isReady(model)) {
+            Log.w(TAG, "Whisper model not ready: ${model.id}")
+            return ""
+        }
+        val engine = whisperEngine ?: WhisperEngine(modelStore.pathFor(model).absolutePath)
+            .also { whisperEngine = it }
+        return engine.transcribe(pcm, language = "auto")
+    }
+
+    private suspend fun polish(text: String, llmModelId: String): String {
+        if (text.isBlank()) return text
+        val model = ModelCatalog.byId(llmModelId) ?: ModelCatalog.llmDefault
+        if (!modelStore.isReady(model)) {
+            Log.w(TAG, "LLM model not ready: ${model.id}")
+            return text
+        }
+        val engine = polishEngine ?: PolishEngine(modelStore.pathFor(model).absolutePath)
+            .also { polishEngine = it }
+        return engine.polish(text)
+    }
+
     private fun insertIntoFocusedEditable(text: String) {
         val node = FlowAccessibilityService.instance?.currentEditableNode()
         if (node == null) {
@@ -88,11 +126,6 @@ class RecordingForegroundService : Service() {
         }
         val ok = TextInserter.insertAtCursor(node, text)
         Log.d(TAG, "insert=$ok len=${text.length}")
-    }
-
-    private fun stubTranscribe(pcm: ShortArray): String {
-        val durationSec = pcm.size.toDouble() / recorder.sampleRate
-        return "[stub] 录音 %.1fs".format(durationSec)
     }
 
     private fun stopSelfSafely() {
@@ -107,14 +140,7 @@ class RecordingForegroundService : Service() {
     }
 
     private fun startForegroundCompat() {
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("OpenFlow")
-            .setContentText("正在录音")
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true)
-            .setSilent(true)
-            .build()
+        val notification = buildNotification()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceCompat.startForeground(
                 this,
@@ -126,6 +152,16 @@ class RecordingForegroundService : Service() {
             startForeground(NOTIF_ID, notification)
         }
     }
+
+    private fun buildNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setContentTitle("OpenFlow")
+            .setContentText("正在录音")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
