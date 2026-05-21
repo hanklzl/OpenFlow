@@ -1,0 +1,45 @@
+# Test Rules
+
+OpenFlow 单测 / 仪器测试的强约束。
+
+## MUST
+
+1. **ViewModel / Coroutine 单测用 `runTest(mainDispatcherRule.dispatcher) { advanceUntilIdle() }`**。
+2. **DataStore 测试用 `UUID.randomUUID()` 后缀的 prefs 文件名**：避免 "multiple DataStores active" 异常。OpenFlow 主代码用 `openflow_settings`，测试代码用别的 key。
+3. **JNI 单测用 mock**：`WhisperJni` / `LlamaJni` 静态方法在 JVM 单测中不可用，必须 mock。
+4. **`AudioRecord` / Service 仪器测试**：放 `androidTest/`，不要塞进 JVM 单测。
+5. **`@Ignore` 必须登记到 `docs/dev-harness/incidents/`**，并注明"什么时候可以解禁"。
+6. **`gradle.properties` `-Xmx ≥ 4096m`**：whisper / llama 编译期内存压力大。
+
+## MUST NOT
+
+1. **禁止 `runBlocking { flow.first { predicate } }`**：collector 不发新值时 hang。
+2. **禁止单测里加载 `libopenflow_jni.so`**：JVM 单测环境没 NDK runtime，`UnsatisfiedLinkError`。
+3. **禁止单测里渲染 Compose 内容**：OpenFlow 暂未引入 Robolectric/Paparazzi；Compose 行为测试只在仪器测试跑。
+4. **禁止悄悄 `@Ignore("flaky")`**：随时间累积成"测试坟场"。
+
+## SHOULD
+
+1. 用 `withTimeoutOrNull(5_000)` 包裹仪器测试的等待逻辑，避免无限挂。
+2. 集成 / E2E 测试覆盖最少 1 个完整 pipeline：长按 → 假 PCM → 假转写 → 写入到 fake EditText 节点。
+
+## 命令
+
+```bash
+./gradlew :app:testDebugUnitTest                              # JVM 单测
+./gradlew :app:testDebugUnitTest --rerun-tasks                # 强制重跑
+./gradlew :app:testDebugUnitTest --tests "<FQN>"              # 单类
+./gradlew :app:connectedDebugAndroidTest                      # 仪器测试
+./gradlew :app:compileDebugUnitTestKotlin                     # 仅编译测试源码（catch 测试 fixture 漂移）
+```
+
+## 相关 incidents
+
+- (暂无)
+
+## 相关代码
+
+- `app/src/test/`（JVM 单测）
+- `app/src/androidTest/`（仪器测试）
+- `app/build.gradle.kts`（测试依赖）
+- `gradle.properties`（JVM 内存）
