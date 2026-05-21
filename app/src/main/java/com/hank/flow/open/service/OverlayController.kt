@@ -6,6 +6,7 @@ import android.os.Build
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
+import com.hank.flow.open.log.OpenFlowLog
 
 /**
  * Owns the floating-ball [FloatingBallView] lifecycle on the [WindowManager].
@@ -19,6 +20,11 @@ class OverlayController(private val context: Context) {
     private var params: WindowManager.LayoutParams? = null
 
     fun show(callbacks: FloatingBallView.Listener) {
+        OpenFlowLog.d(
+            OpenFlowLog.Tag.OVERLAY,
+            "overlay_show_call",
+            mapOf("alreadyShown" to (ballView != null)),
+        )
         if (ballView != null) return
         val view = FloatingBallView(context).also { it.listener = callbacks }
         val sizePx = (56 * context.resources.displayMetrics.density).toInt()
@@ -39,12 +45,16 @@ class OverlayController(private val context: Context) {
             windowManager.addView(view, lp)
             ballView = view
             params = lp
+            OpenFlowLog.d(OpenFlowLog.Tag.OVERLAY, "overlay_show_applied")
         } catch (t: Throwable) {
             Log.e(TAG, "addView failed", t)
+            OpenFlowLog.e(OpenFlowLog.Tag.OVERLAY, "overlay_show_failed", t)
         }
     }
 
     fun hide() {
+        val hadView = ballView != null
+        OpenFlowLog.d(OpenFlowLog.Tag.OVERLAY, "overlay_hide_call", mapOf("hadView" to hadView))
         ballView?.let {
             try { windowManager.removeView(it) } catch (_: Throwable) {}
         }

@@ -1,5 +1,6 @@
 package com.hank.flow.open.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,20 +10,24 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hank.flow.open.log.LogExporter
 import com.hank.flow.open.settings.FlowSettings
 import com.hank.flow.open.settings.SettingsStore
 import kotlinx.coroutines.launch
@@ -94,6 +99,45 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 }
             },
         )
+
+        Spacer(Modifier.height(24.dp))
+        Text("诊断", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        var exporting by remember { mutableStateOf(false) }
+        Text(
+            "导出本机加密日志（AES-CBC）并通过分享面板发出。解密需要 tools/logan/decode-logan.sh。",
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+        )
+        Spacer(Modifier.height(8.dp))
+        Button(
+            enabled = !exporting,
+            onClick = {
+                exporting = true
+                scope.launch {
+                    val result = runCatching { LogExporter.exportToZip(context) }
+                    exporting = false
+                    result.onSuccess { zip ->
+                        runCatching { LogExporter.share(context, zip) }
+                            .onFailure {
+                                Toast.makeText(
+                                    context,
+                                    "分享失败：${it.message}",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                    }.onFailure {
+                        Toast.makeText(
+                            context,
+                            "导出失败：${it.message}",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                }
+            },
+        ) {
+            Text(if (exporting) "正在打包…" else "导出日志")
+        }
     }
 }
 

@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import com.hank.flow.open.log.OpenFlowLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,6 +39,11 @@ class AudioRecorder {
 
     @SuppressLint("MissingPermission")
     fun start(scope: CoroutineScope) {
+        OpenFlowLog.d(
+            OpenFlowLog.Tag.AUDIO,
+            "record_start_call",
+            mapOf("jobActive" to (job?.isActive == true)),
+        )
         if (job?.isActive == true) return
         captured.clear()
         val ar = AudioRecord(
@@ -48,11 +54,21 @@ class AudioRecorder {
             bufferShorts * 2,
         )
         if (ar.state != AudioRecord.STATE_INITIALIZED) {
+            OpenFlowLog.e(
+                OpenFlowLog.Tag.AUDIO,
+                "record_init_failed",
+                fields = mapOf("state" to ar.state),
+            )
             ar.release()
             return
         }
         recorder = ar
         ar.startRecording()
+        OpenFlowLog.d(
+            OpenFlowLog.Tag.AUDIO,
+            "record_loop_start",
+            mapOf("bufferShorts" to bufferShorts),
+        )
         job = scope.launch(Dispatchers.IO) {
             val buffer = ShortArray(bufferShorts)
             while (isActive) {
@@ -67,6 +83,7 @@ class AudioRecorder {
     }
 
     fun stop(): ShortArray {
+        OpenFlowLog.d(OpenFlowLog.Tag.AUDIO, "record_stop", mapOf("captured" to captured.size))
         job?.cancel()
         job = null
         recorder?.let {

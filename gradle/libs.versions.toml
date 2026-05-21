@@ -8,6 +8,7 @@ composeBom = "2024.10.01"
 datastorePreferences = "1.1.1"
 okhttp = "4.12.0"
 kotlinxCoroutines = "1.9.0"
+logan = "1.3.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -24,6 +25,7 @@ androidx-material-icons-extended = { group = "androidx.compose.material", name =
 androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastorePreferences" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinxCoroutines" }
+logan = { group = "com.dianping.android.sdk", name = "logan", version.ref = "logan" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

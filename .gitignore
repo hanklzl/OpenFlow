@@ -7,8 +7,10 @@ build/
 captures/
 .externalNativeBuild/
 .cxx/
+.kotlin/
 *.apk
 *.aab
 *.keystore
 *.jks
 app/release/
+tools/logan/out/

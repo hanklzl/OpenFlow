@@ -7,6 +7,7 @@ import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.hank.flow.open.log.OpenFlowLog
 
 class FlowAccessibilityService : AccessibilityService() {
 
@@ -16,14 +17,25 @@ class FlowAccessibilityService : AccessibilityService() {
     private val overlayCallbacks = object : FloatingBallView.Listener {
         override fun onRecordStart() {
             Log.d(TAG, "RecordStart editable=${lastEditableNode != null}")
+            OpenFlowLog.d(
+                OpenFlowLog.Tag.A11Y,
+                "record_start_fired",
+                mapOf("lastEditableNonNull" to (lastEditableNode != null)),
+            )
             startFgsWithAction(RecordingForegroundService.ACTION_START)
         }
         override fun onRecordCancel() {
             Log.d(TAG, "RecordCancel")
+            OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "record_cancel_fired")
             startFgsWithAction(RecordingForegroundService.ACTION_CANCEL)
         }
         override fun onRecordCommit() {
             Log.d(TAG, "RecordCommit")
+            OpenFlowLog.d(
+                OpenFlowLog.Tag.A11Y,
+                "record_commit_fired",
+                mapOf("lastEditableNonNull" to (lastEditableNode != null)),
+            )
             startFgsWithAction(RecordingForegroundService.ACTION_COMMIT)
         }
         override fun onDragMove(dx: Float, dy: Float) {
@@ -59,14 +71,37 @@ class FlowAccessibilityService : AccessibilityService() {
             notificationTimeout = 80L
         }
         Log.d(TAG, "Connected.")
+        OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "service_connected")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
+        OpenFlowLog.d(
+            OpenFlowLog.Tag.A11Y,
+            "a11y_event",
+            mapOf(
+                "type" to eventTypeName(event.eventType),
+                "pkg" to event.packageName,
+                "cls" to event.className,
+            ),
+        )
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
-                val source = event.source ?: return
+                val source = event.source ?: run {
+                    OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "overlay_show_skipped_no_source")
+                    return
+                }
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.A11Y,
+                    "overlay_show_decided",
+                    mapOf(
+                        "isEditable" to source.isEditable,
+                        "windowId" to source.windowId,
+                        "viewId" to source.viewIdResourceName,
+                        "cls" to source.className,
+                    ),
+                )
                 if (source.isEditable) {
                     lastEditableNode = source
                     overlay.show(overlayCallbacks)
@@ -74,7 +109,13 @@ class FlowAccessibilityService : AccessibilityService() {
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 val pkg = event.packageName?.toString().orEmpty()
-                if (pkg == packageName) {
+                val matchesSelf = pkg == packageName
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.A11Y,
+                    "overlay_hide_decided",
+                    mapOf("pkg" to pkg, "matchesSelf" to matchesSelf),
+                )
+                if (matchesSelf) {
                     overlay.hide()
                     lastEditableNode = null
                 }
@@ -84,9 +125,11 @@ class FlowAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         Log.d(TAG, "onInterrupt")
+        OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "service_interrupted")
     }
 
     override fun onDestroy() {
+        OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "service_destroyed")
         overlay.hide()
         if (instance === this) instance = null
         super.onDestroy()
@@ -95,6 +138,18 @@ class FlowAccessibilityService : AccessibilityService() {
     fun currentEditableNode(): AccessibilityNodeInfo? = lastEditableNode
 
     fun forceHideOverlay() { overlay.hide() }
+
+    private fun eventTypeName(type: Int): String = when (type) {
+        AccessibilityEvent.TYPE_VIEW_FOCUSED -> "VIEW_FOCUSED"
+        AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> "VIEW_TEXT_SELECTION_CHANGED"
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> "WINDOW_STATE_CHANGED"
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> "WINDOW_CONTENT_CHANGED"
+        AccessibilityEvent.TYPE_WINDOWS_CHANGED -> "WINDOWS_CHANGED"
+        AccessibilityEvent.TYPE_VIEW_CLICKED -> "VIEW_CLICKED"
+        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> "VIEW_LONG_CLICKED"
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> "VIEW_TEXT_CHANGED"
+        else -> "TYPE_$type"
+    }
 
     companion object {
         private const val TAG = "FlowA11y"
