@@ -33,13 +33,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android NDK 26.1.10909125
+      - name: Install Android NDK 29.0.14206865
         run: |
           set -euxo pipefail
           yes | sdkmanager --install \
-            "ndk;26.1.10909125" \
+            "ndk;29.0.14206865" \
             "cmake;3.22.1"
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Setup Gradle (with cache)
         uses: gradle/actions/setup-gradle@v3

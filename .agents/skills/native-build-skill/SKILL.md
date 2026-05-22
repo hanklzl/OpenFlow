@@ -80,7 +80,7 @@ ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
 
 ### MUST: NDK 版本固定
 
-当前 NDK `27.0.12077973`。升级前先在临时 worktree 完整 build + 真机跑通"长按 → 写入"全链路，再合并。
+当前 NDK `29.0.14206865`（r29，最新稳定版；r28+ 默认链接 16KB 段对齐，无需在 CMake 里加 `-Wl,-z,max-page-size=16384`）。升级前先在临时 worktree 完整 build + 真机跑通"长按 → 写入"全链路，再合并。
 
 ### MUST: submodule 升级流程
 

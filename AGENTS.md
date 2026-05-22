@@ -80,12 +80,12 @@ Release 构建只在签名环境变量齐备或任务明确涉及发布/签名�
 - targetSdk：35 (Android 15)
 - compileSdk：35
 - Java compatibility：`VERSION_17`
-- JVM toolchain：JDK 21
-- Gradle Wrapper：`8.10.2`
-- AGP：`8.7.3`
-- Kotlin：`2.0.21`
-- Compose BOM：`2024.10.01`
-- NDK：`27.0.12077973`
+- JVM toolchain：JDK 17（CI 与本地统一，AGP 9.2 最低要求）
+- Gradle Wrapper：`9.4.1`
+- AGP：`9.2.0`
+- Kotlin：`2.3.21`
+- Compose BOM：`2026.05.00`
+- NDK：`29.0.14206865`（r29，最新稳定版；r28+ 默认 16KB 段对齐，无需 CMake 额外 flag）
 - CMake：`3.22.1`
 - ABI Filters：`arm64-v8a` + `x86_64`
 
