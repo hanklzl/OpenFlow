@@ -12,6 +12,7 @@
 6. **焦点节点引用读自 `FlowAccessibilityService.instance?.currentEditableNode()`**，不要通过 Parcel / Bundle 传 `AccessibilityNodeInfo`。
 7. **PCM 仅活在内存**：录音结束 → 转写 → 立即释放。不写到磁盘做"重放"。
 8. **`Dispatchers.Default` 上跑 transcribe / polish**：避免阻塞 IO 线程池。
+9. **`TextInserter` 必须读取 `AccessibilityNodeInfo.isShowingHintText`，并将其为 `true` 时的 `node.text` 视为空内容**；后续的 splice / 光标计算只能基于这个归一化后的值。`node.text` 在 EditText 处于"显示 hint placeholder"时会返回 hint 字符串而不是空串，直接拼接会把 hint 字面写进 EditText（见 [INC-SERVICE-0002](../incidents/INC-SERVICE-0002.md)）。归一化逻辑必须封装在 `insertion/TextInsertionPlan.kt` 的 `TextInsertionState.effectiveCurrent` 中，并保留对应 JVM 单测。
 
 ## MUST NOT
 
@@ -41,7 +42,8 @@
 
 ## 相关 incidents
 
-- (暂无；首次违反时补 incident)
+- [INC-SERVICE-0001](../incidents/INC-SERVICE-0001.md) — 悬浮球被自身 WINDOW_STATE_CHANGED 立刻隐藏
+- [INC-SERVICE-0002](../incidents/INC-SERVICE-0002.md) — TextInserter 把 hint 当 currentText 拼接
 
 ## 相关代码
 

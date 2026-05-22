@@ -83,4 +83,6 @@ dependencies {
     implementation(libs.logan)
 
     debugImplementation(libs.androidx.ui.tooling)
+
+    testImplementation(libs.junit)
 }

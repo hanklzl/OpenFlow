@@ -108,14 +108,19 @@ class FlowAccessibilityService : AccessibilityService() {
                 }
             }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val pkg = event.packageName?.toString().orEmpty()
-                val matchesSelf = pkg == packageName
+                val pkg = event.packageName?.toString()
+                val cls = event.className?.toString()
+                val shouldHide = shouldHideOverlayForOwnWindowStateChange(
+                    eventPackage = pkg,
+                    eventClass = cls,
+                    ownPackage = packageName,
+                )
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.A11Y,
                     "overlay_hide_decided",
-                    mapOf("pkg" to pkg, "matchesSelf" to matchesSelf),
+                    mapOf("pkg" to pkg, "cls" to cls, "shouldHide" to shouldHide),
                 )
-                if (matchesSelf) {
+                if (shouldHide) {
                     overlay.hide()
                     lastEditableNode = null
                 }

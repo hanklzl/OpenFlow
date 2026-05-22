@@ -11,7 +11,7 @@
 5. **`FlowAccessibilityService.lastEditableNode` 必须 `@Volatile`**：会被 FGS 的协程读取。
 6. **`onAccessibilityEvent` 中**：
    - `TYPE_VIEW_FOCUSED` / `TYPE_VIEW_TEXT_SELECTION_CHANGED` 且 `source.isEditable` → 更新缓存 + 显示悬浮球
-   - `TYPE_WINDOW_STATE_CHANGED` 且 packageName == 自己 → 隐藏悬浮球 + 清空缓存
+   - `TYPE_WINDOW_STATE_CHANGED` 隐藏悬浮球的判定**必须**同时满足 `pkg == ownPackage` **且** `cls.startsWith("$ownPackage.")`。仅判等包名会把自身 overlay 的 `cls=android.view.View` 状态变化误判成"用户切回了我方 Activity"，让刚显示的悬浮球立刻消失（见 [INC-SERVICE-0001](../incidents/INC-SERVICE-0001.md)）。判定必须封装在 `OverlayHideDecision.shouldHideOverlayForOwnWindowStateChange` 中，且对应 JVM 单测必须保持运行。
 7. **悬浮窗用 `TYPE_APPLICATION_OVERLAY`**（Android 8+），不需要 `TYPE_PHONE` fallback（minSdk=31）。
 8. **悬浮球长按延迟 `armDelayMs ≥ 200ms`**（当前 250ms），防误触。
 9. **`TextInserter.insertAtCursor` 用 `ACTION_SET_TEXT` 整体替换 + `ACTION_SET_SELECTION` 调光标**。
@@ -34,7 +34,7 @@
 
 ## 相关 incidents
 
-- (暂无；首次违反时补 incident)
+- [INC-SERVICE-0001](../incidents/INC-SERVICE-0001.md) — 悬浮球被自身 WINDOW_STATE_CHANGED 立刻隐藏
 
 ## 相关代码
 

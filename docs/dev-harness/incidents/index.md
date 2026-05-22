@@ -10,11 +10,10 @@
 
 ## 当前 incidents
 
-> 项目刚起步，暂无登记的 incident。
-> 第一次踩坑后请按下表登记。
-
 | ID | Area | One-liner | Status |
 |---|---|---|---|
+| [INC-SERVICE-0001](INC-SERVICE-0001.md) | SERVICE | 悬浮球被自身 overlay 窗口的 WINDOW_STATE_CHANGED 立刻隐藏，全链路入口断开 | resolved |
+| [INC-SERVICE-0002](INC-SERVICE-0002.md) | SERVICE | TextInserter 把 EditText 的 hint 当作已有文本拼接（如 "Search settings[BLANK_AUDIO]"） | resolved |
 
 ## Incident 模板
 
