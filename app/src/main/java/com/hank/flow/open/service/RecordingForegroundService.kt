@@ -28,6 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 /**
@@ -293,6 +294,12 @@ class RecordingForegroundService : Service() {
         OpenFlowLog.flush()
         rmsJob?.cancel()
         captureJob?.cancel()
+        runBlocking {
+            whisperEngine?.release()
+            polishEngine?.release()
+        }
+        whisperEngine = null
+        polishEngine = null
         scope.cancel()
         super.onDestroy()
     }
