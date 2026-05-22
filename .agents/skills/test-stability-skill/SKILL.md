@@ -20,6 +20,20 @@ OpenFlow 单测 / 集成测试 / 真机测试的稳定性约束。
 - [`../../../docs/dev-harness/test/rules.md`](../../../docs/dev-harness/test/rules.md)
 - [`../../../docs/dev-harness/incidents/index.md`](../../../docs/dev-harness/incidents/index.md)
 
+## 功能迭代单测策略
+
+功能迭代包括新增功能、行为修改、bugfix、异常 / 降级处理变更。每次功能迭代都必须同步新增或更新对应 JVM 单元测试，并采用 TDD：先写并运行会失败的测试，再实现最小代码使其通过。
+
+纯文档、格式化、注释、无行为变化的构建脚本调整可不新增业务单测，但仍必须通过现有 unit test gate。
+
+单测必须覆盖正常路径与异常 / 降级路径；涉及设置、模型、ASR、polish、插入、权限、下载、Service 协作等行为时，至少覆盖主要成功路径和可预期失败 / 未就绪 / fallback 路径。
+
+JVM 单测必须快速、确定、无真实外部依赖：禁止真实网络、真实 JNI `.so`、真实 `AudioRecord`、无限等待；使用 fake / mock / test dispatcher 保持可重复。
+
+定期 review 测试必要性，删除或重写重复、脆弱、低价值、高耗时测试，避免测试套件膨胀后反向阻碍迭代。
+
+功能收尾必须通过 `./gradlew :app:testDebugUnitTest`；优先运行 `bash scripts/dev-harness/check.sh` 覆盖 symlink、grep guard、test source compile 与 JVM unit test gate。
+
 ## 不变约束
 
 ### MUST: ViewModel / Coroutine 单测用 runTest

@@ -138,8 +138,8 @@ def guard_local_lifecycle_owner_import() -> Iterable[Hit]:
 
 
 def guard_no_android_util_log_in_business_code() -> Iterable[Hit]:
-    """Business Kotlin code uses android.util.Log only inside service/ and audio/ packages
-    (where logcat is the only practical channel). UI / domain logic should bubble errors up.
+    """Business Kotlin code uses android.util.Log only inside low-level packages
+    and the central logging facade. UI / domain logic should bubble errors up.
     This guard is informational for OpenFlow v0.x; tighten as project grows.
     """
     allowed_prefixes = (
@@ -149,6 +149,7 @@ def guard_no_android_util_log_in_business_code() -> Iterable[Hit]:
         "app/src/main/java/com/hank/flow/open/llm/",
         "app/src/main/java/com/hank/flow/open/insertion/",
         "app/src/main/java/com/hank/flow/open/model/",
+        "app/src/main/java/com/hank/flow/open/log/",
     )
     pattern = re.compile(r"\bandroid\.util\.Log\b")
     for kt in (ROOT / "app/src/main/java").rglob("*.kt"):
@@ -159,7 +160,7 @@ def guard_no_android_util_log_in_business_code() -> Iterable[Hit]:
             if pattern.search(line):
                 yield Hit(
                     area="ui",
-                    message="android.util.Log not allowed outside service/audio/asr/llm/insertion/model packages",
+                    message="android.util.Log not allowed outside service/audio/asr/llm/insertion/model/log packages",
                     file=rel,
                     line=i,
                 )
