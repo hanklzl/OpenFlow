@@ -49,6 +49,7 @@ import androidx.core.content.ContextCompat
 import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
 import com.hank.flow.open.llm.PolishEngine
+import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
 import com.hank.flow.open.model.ModelStore
 import com.hank.flow.open.settings.SettingsStore
@@ -207,19 +208,50 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                             scope.launch {
                                 if (!whisperReady) {
                                     log("whisper model not ready; skip")
+                                    OpenFlowLog.d(
+                                        OpenFlowLog.Tag.ASR,
+                                        "debug_skip_whisper_not_ready",
+                                        mapOf("model" to whisperModel.id),
+                                    )
                                     return@launch
                                 }
                                 transcribeRunning = true
                                 val t0 = System.currentTimeMillis()
-                                val whisperEngine = WhisperEngine(store.pathFor(whisperModel).absolutePath)
+                                val whisperFile = store.pathFor(whisperModel)
+                                OpenFlowLog.d(
+                                    OpenFlowLog.Tag.ASR,
+                                    "debug_asr_start",
+                                    mapOf(
+                                        "model" to whisperModel.id,
+                                        "pcmShorts" to pcm.size,
+                                        "fileLen" to (if (whisperFile.exists()) whisperFile.length() else -1L),
+                                        "expectedLen" to whisperModel.sizeBytes,
+                                    ),
+                                )
+                                val whisperEngine = WhisperEngine(whisperFile.absolutePath)
                                 rawText = whisperEngine.transcribe(pcm, language = "auto")
                                 transcribeLatencyMs = System.currentTimeMillis() - t0
                                 transcribeRunning = false
                                 log("transcribe ${transcribeLatencyMs}ms -> '${rawText.take(60)}'")
+                                OpenFlowLog.d(
+                                    OpenFlowLog.Tag.ASR,
+                                    "debug_asr_done",
+                                    mapOf(
+                                        "model" to whisperModel.id,
+                                        "latencyMs" to transcribeLatencyMs,
+                                        "textLen" to rawText.length,
+                                        "blank" to rawText.isBlank(),
+                                    ),
+                                )
 
                                 if (polishThisRun && llmReady && rawText.isNotBlank()) {
                                     polishRunning = true
                                     val p0 = System.currentTimeMillis()
+                                    OpenFlowLog.d(
+                                        OpenFlowLog.Tag.LLM,
+                                        "debug_polish_start",
+                                        mapOf("model" to llmModel.id, "inLen" to rawText.length),
+                                    )
                                     val polishEngine = PolishEngine(
                                         modelPath = store.pathFor(llmModel).absolutePath,
                                         isQwen3 = llmModel.id.startsWith("qwen3-"),
@@ -228,9 +260,23 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                                     polishLatencyMs = System.currentTimeMillis() - p0
                                     polishRunning = false
                                     log("polish ${polishLatencyMs}ms -> '${polishedText.take(60)}'")
+                                    OpenFlowLog.d(
+                                        OpenFlowLog.Tag.LLM,
+                                        "debug_polish_done",
+                                        mapOf(
+                                            "model" to llmModel.id,
+                                            "latencyMs" to polishLatencyMs,
+                                            "outLen" to polishedText.length,
+                                        ),
+                                    )
                                     polishEngine.release()
                                 } else if (polishThisRun && !llmReady) {
                                     log("polish skipped: LLM model not ready")
+                                    OpenFlowLog.d(
+                                        OpenFlowLog.Tag.LLM,
+                                        "debug_skip_polish_not_ready",
+                                        mapOf("model" to llmModel.id),
+                                    )
                                 }
                                 whisperEngine.release()
                             }

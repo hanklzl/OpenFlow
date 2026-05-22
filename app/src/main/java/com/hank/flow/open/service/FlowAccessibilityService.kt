@@ -20,13 +20,13 @@ class FlowAccessibilityService : AccessibilityService() {
             OpenFlowLog.d(
                 OpenFlowLog.Tag.A11Y,
                 "record_start_fired",
-                mapOf("lastEditableNonNull" to (lastEditableNode != null)),
+                lastNodeFields(),
             )
             startFgsWithAction(RecordingForegroundService.ACTION_START)
         }
         override fun onRecordCancel() {
             Log.d(TAG, "RecordCancel")
-            OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "record_cancel_fired")
+            OpenFlowLog.d(OpenFlowLog.Tag.A11Y, "record_cancel_fired", lastNodeFields())
             startFgsWithAction(RecordingForegroundService.ACTION_CANCEL)
         }
         override fun onRecordCommit() {
@@ -34,7 +34,7 @@ class FlowAccessibilityService : AccessibilityService() {
             OpenFlowLog.d(
                 OpenFlowLog.Tag.A11Y,
                 "record_commit_fired",
-                mapOf("lastEditableNonNull" to (lastEditableNode != null)),
+                lastNodeFields(),
             )
             startFgsWithAction(RecordingForegroundService.ACTION_COMMIT)
         }
@@ -96,9 +96,13 @@ class FlowAccessibilityService : AccessibilityService() {
                     OpenFlowLog.Tag.A11Y,
                     "overlay_show_decided",
                     mapOf(
+                        "eventType" to eventTypeName(event.eventType),
                         "isEditable" to source.isEditable,
+                        "isFocused" to source.isFocused,
+                        "isPassword" to source.isPassword,
                         "windowId" to source.windowId,
                         "viewId" to source.viewIdResourceName,
+                        "pkg" to source.packageName,
                         "cls" to source.className,
                     ),
                 )
@@ -143,6 +147,16 @@ class FlowAccessibilityService : AccessibilityService() {
     fun currentEditableNode(): AccessibilityNodeInfo? = lastEditableNode
 
     fun forceHideOverlay() { overlay.hide() }
+
+    private fun lastNodeFields(): Map<String, Any?> {
+        val node = lastEditableNode
+        return mapOf(
+            "lastEditableNonNull" to (node != null),
+            "lastPkg" to node?.packageName,
+            "lastCls" to node?.className,
+            "lastViewId" to node?.viewIdResourceName,
+        )
+    }
 
     /** Exposed for [RecordingForegroundService] to push pipeline state + RMS. */
     val overlayController: OverlayController? get() = if (::overlay.isInitialized) overlay else null
