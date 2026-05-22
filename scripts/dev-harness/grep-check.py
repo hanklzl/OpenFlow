@@ -73,10 +73,14 @@ def guard_cmake_subdir_order() -> Iterable[Hit]:
         )
 
 
-def guard_abi_filter_arm64_only() -> Iterable[Hit]:
-    """abiFilters must only contain arm64-v8a."""
+def guard_abi_filter_supported_only() -> Iterable[Hit]:
+    """abiFilters must only contain arm64-v8a and x86_64."""
     rel = "app/build.gradle.kts"
-    forbidden = ("armeabi-v7a", '"x86"', "x86_64")
+    lines = lines_of(rel)
+    forbidden = ("armeabi-v7a", '"x86"')
+    required = ('"arm64-v8a"', '"x86_64"')
+    content = "\n".join(line for _, line in lines)
+    abi_line = next((i for i, line in lines if "abiFilters" in line), 1)
     for i, line in lines_of(rel):
         if "abiFilters" not in line:
             continue
@@ -84,10 +88,18 @@ def guard_abi_filter_arm64_only() -> Iterable[Hit]:
             if token in line:
                 yield Hit(
                     area="native",
-                    message=f"abiFilters must only contain arm64-v8a; found {token}",
+                    message=f"abiFilters must only contain arm64-v8a and x86_64; found {token}",
                     file=rel,
                     line=i,
                 )
+    for token in required:
+        if token not in content:
+            yield Hit(
+                area="native",
+                message=f"abiFilters must include {token}",
+                file=rel,
+                line=abi_line,
+            )
 
 
 def guard_fgs_type_microphone() -> Iterable[Hit]:
@@ -177,7 +189,7 @@ def guard_jni_function_naming() -> Iterable[Hit]:
 
 GUARDS: list[Callable[[], Iterable[Hit]]] = [
     guard_cmake_subdir_order,
-    guard_abi_filter_arm64_only,
+    guard_abi_filter_supported_only,
     guard_fgs_type_microphone,
     guard_local_lifecycle_owner_import,
     guard_no_android_util_log_in_business_code,

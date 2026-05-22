@@ -45,7 +45,7 @@ description: >
 
 | 域 | 关键 grep / 检查 |
 |---|---|
-| native | `add_subdirectory(third_party/llama.cpp)` 必须先于 `add_subdirectory(third_party/whisper.cpp)`；`abiFilters` 只含 `arm64-v8a`；NDK 版本是否在 AGENTS.md baseline |
+| native | `add_subdirectory(third_party/llama.cpp)` 必须先于 `add_subdirectory(third_party/whisper.cpp)`；`abiFilters` 只含 `arm64-v8a` + `x86_64`；NDK 版本是否在 AGENTS.md baseline |
 | service | manifest 中 `foregroundServiceType="microphone"` + `FOREGROUND_SERVICE_MICROPHONE` 权限；`FlowAccessibilityService.instance` 没有被 Activity 持有 |
 | pipeline | `RecordingForegroundService` 只有 3 个 ACTION_*；`PolishEngine` / `WhisperEngine` 都用 `Mutex` |
 | ui | `LocalLifecycleOwner` 来自 `androidx.lifecycle.compose`（不是 `androidx.compose.ui.platform`） |

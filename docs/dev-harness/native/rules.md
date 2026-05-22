@@ -5,7 +5,7 @@
 ## MUST
 
 1. **`add_subdirectory(third_party/llama.cpp)` 必须先于 `add_subdirectory(third_party/whisper.cpp)`**。原因：whisper.cpp 的 `if (NOT TARGET ggml)` 守卫保证 ggml 不重定义；llama 先添加才能让 whisper 复用其 ggml。
-2. **仅打 `arm64-v8a`**：`app/build.gradle.kts` `abiFilters += listOf("arm64-v8a")`。
+2. **仅打 `arm64-v8a` + `x86_64`**：`app/build.gradle.kts` `abiFilters += listOf("arm64-v8a", "x86_64")`。`x86_64` 用于本地 emulator 验证。
 3. **禁用所有 examples / tests / tools**（已在 `CMakeLists.txt`）：`LLAMA_BUILD_*`、`WHISPER_BUILD_*`、`GGML_*` 等关键 OFF。
 4. **JNI 函数命名严格匹配 Kotlin `external` 声明**：
    - 格式 `Java_<kotlin.package.with.underscores>_<ClassName>_<methodName>`
@@ -24,7 +24,7 @@
 ## MUST NOT
 
 1. **禁止改 `add_subdirectory` 顺序**（whisper 先于 llama）。
-2. **禁止加 `armeabi-v7a` / `x86` / `x86_64` abiFilter**：编译时间 x3-x4，APK 体积 x3。
+2. **禁止加 `armeabi-v7a` / `x86` abiFilter**：编译时间与 APK 体积会继续膨胀；当前只保留主流真机 `arm64-v8a` 与 emulator `x86_64`。
 3. **禁止启用 `GGML_OPENMP`**：NDK 缺 OpenMP runtime，编译会失败。
 4. **禁止启用 `LLAMA_CURL` / `GGML_CURL`**：会拉 curl 静态库进 APK，体积 +20MB+。
 5. **禁止启用 `WHISPER_BUILD_*` / `LLAMA_BUILD_EXAMPLES`**：拉一堆没用的 binary 进编译。

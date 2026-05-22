@@ -7,7 +7,7 @@
 | Rule | grep 锚点 |
 |---|---|
 | llama 在 whisper 之前 | `app/src/main/cpp/CMakeLists.txt` |
-| 仅 arm64-v8a | `app/build.gradle.kts` `abiFilters` |
+| 仅 arm64-v8a + x86_64 | `app/build.gradle.kts` `abiFilters` |
 | 禁所有 examples/tests | `app/src/main/cpp/CMakeLists.txt` `BUILD_TESTS OFF` 等行 |
 
 ### service

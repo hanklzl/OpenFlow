@@ -87,7 +87,7 @@ Release 构建只在签名环境变量齐备或任务明确涉及发布/签名�
 - Compose BOM：`2024.10.01`
 - NDK：`27.0.12077973`
 - CMake：`3.22.1`
-- ABI Filters：仅 `arm64-v8a`
+- ABI Filters：`arm64-v8a` + `x86_64`
 
 ## 模块架构
 
@@ -145,7 +145,7 @@ app/src/main/
 新增或修改 `cpp/` 下任意文件、`CMakeLists.txt`、submodule 版本或 JNI 签名前，必须读取并遵守 [docs/dev-harness/native/rules.md](docs/dev-harness/native/rules.md)。
 
 - whisper.cpp 与 llama.cpp **共享 ggml**：CMakeLists 必须先 `add_subdirectory(third_party/llama.cpp)`，再 `add_subdirectory(third_party/whisper.cpp)`；whisper.cpp 的 `if (NOT TARGET ggml)` 守卫保证不重定义。**禁止改顺序**。
-- 仅打 `arm64-v8a`；不引入 armeabi-v7a / x86 / x86_64（覆盖 99% Android 12+ 设备，APK 体积 -3x）。
+- 仅打 `arm64-v8a` + `x86_64`；`x86_64` 用于本地 emulator 验证。不引入 armeabi-v7a / x86（覆盖 Android 12+ 主流设备，同时保留 emulator 可运行性）。
 - JNI 方法签名 `Java_com_hank_flow_open_<package>_<class>_<method>` 必须与 Kotlin `external` 声明精确匹配；改 Kotlin 包名 / 类名必须同步改 cpp 入口。
 - whisper PCM 输入：JNI 接收 `jshortArray` 后必须除以 `32768.0f` 转 float，**禁止**让 Kotlin 侧做归一化。
 - llama 生成：`llama_memory_clear(memory, true)` 必须在每次 `nativeGenerate` 开头清 KV，否则上次会话的 KV 会污染本次润色。

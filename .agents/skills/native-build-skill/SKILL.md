@@ -62,16 +62,16 @@ set(GGML_BACKEND_DL                OFF CACHE BOOL "" FORCE)
 
 漏一个会让 APK 体积膨胀几十 MB（curl 静态链）或编译失败（OpenMP 在 NDK 缺乏 runtime）。
 
-### MUST: 只打 arm64-v8a
+### MUST: 只打 arm64-v8a + x86_64
 
 `app/build.gradle.kts`：
 
 ```kotlin
-ndk { abiFilters += listOf("arm64-v8a") }
+ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
 ```
 
-加 `armeabi-v7a` / `x86_64` 会让 NDK 编译时间 x3-x4，APK 体积膨胀 3x。
-Android 12+ 设备 99% 是 arm64；32-bit ARM 已经基本退场。
+`arm64-v8a` 覆盖主流真机，`x86_64` 用于本地 Android emulator 验证。
+仍禁止加 `armeabi-v7a` / `x86`，避免继续放大 NDK 编译时间与 APK 体积。
 
 ### MUST: 不要改 C++ 标准
 
@@ -144,6 +144,7 @@ unzip -l app/build/outputs/apk/debug/app-debug.apk | grep '\.so'
 
 # 看 JNI 符号
 file app/build/intermediates/cxx/Debug/*/obj/arm64-v8a/libopenflow_jni.so
+file app/build/intermediates/cxx/Debug/*/obj/x86_64/libopenflow_jni.so
 ```
 
 ## 参考
