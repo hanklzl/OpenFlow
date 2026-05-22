@@ -144,6 +144,9 @@ class FlowAccessibilityService : AccessibilityService() {
 
     fun forceHideOverlay() { overlay.hide() }
 
+    /** Exposed for [RecordingForegroundService] to push pipeline state + RMS. */
+    val overlayController: OverlayController? get() = if (::overlay.isInitialized) overlay else null
+
     private fun eventTypeName(type: Int): String = when (type) {
         AccessibilityEvent.TYPE_VIEW_FOCUSED -> "VIEW_FOCUSED"
         AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> "VIEW_TEXT_SELECTION_CHANGED"

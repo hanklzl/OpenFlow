@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Floating ball palette per design doc. Hardcoded by intent: the ball
+         renders directly on WindowManager and must look the same regardless
+         of the host app's theme. -->
+    <color name="ball_state_idle">#4F46E5</color>
+    <color name="ball_state_arming">#6366F1</color>
+    <color name="ball_state_recording">#10B981</color>
+    <color name="ball_state_canceling">#EF4444</color>
+    <color name="ball_state_processing">#6366F1</color>
+    <color name="ball_state_processing_ring">#A78BFA</color>
+    <color name="ball_state_done">#10B981</color>
+    <color name="ball_state_copied">#0EA5E9</color>
+    <color name="ball_state_failed">#EF4444</color>
+    <color name="ball_ripple">#10B981</color>
+
+    <!-- Result pill background + accents. -->
+    <color name="pill_background">#E0000000</color>
+    <color name="pill_text">#FFFFFFFF</color>
+</resources>

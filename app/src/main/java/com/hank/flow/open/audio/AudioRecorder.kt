@@ -30,6 +30,9 @@ class AudioRecorder {
     private var recorder: AudioRecord? = null
     private var job: Job? = null
 
+    /** True once [start] has acquired the AudioRecord and the capture loop is running. */
+    val isCapturing: Boolean get() = recorder != null && job?.isActive == true
+
     val sampleRate = 16_000
     private val bufferShorts = AudioRecord.getMinBufferSize(
         sampleRate,

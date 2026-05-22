@@ -13,7 +13,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
+import com.hank.flow.open.insertion.PipelineResult
 import com.hank.flow.open.insertion.TextInserter
+import com.hank.flow.open.insertion.decideOutcome
 import com.hank.flow.open.llm.PolishEngine
 import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
@@ -24,19 +26,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Foreground service (type=microphone) that owns the audio + ASR + polish + insert pipeline.
  *
  * Lifecycle: a single FGS instance starts on ACTION_START (long-press), keeps recording
  * until ACTION_COMMIT or ACTION_CANCEL, then runs the pipeline and stops itself.
+ *
+ * UI feedback: pushes [BallState] + [PillSpec] through [FlowAccessibilityService.overlayController]
+ * so the floating ball reflects every pipeline stage. Failure UI is narrow — model-not-ready /
+ * empty ASR stay silent per `pipeline/rules.md` MUST 3; only real exceptions surface a pill.
  */
 class RecordingForegroundService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val recorder = AudioRecorder()
     private var captureJob: Job? = null
+    private var rmsJob: Job? = null
     private var capturing = false
 
     private val settingsStore by lazy { SettingsStore(applicationContext) }
@@ -70,10 +79,27 @@ class RecordingForegroundService : Service() {
     private fun handleStart() {
         if (capturing) return
         startForegroundCompat()
-        capturing = true
         recorder.start(scope)
-        Log.d(TAG, "recording started")
+        capturing = recorder.isCapturing
+        if (!capturing) {
+            OpenFlowLog.e(OpenFlowLog.Tag.FGS, "recording_start_failed")
+            scope.launch { applyResult(PipelineResult.Failed("麦克风启动失败")) }
+            stopSelfSafely()
+            return
+        }
+        startRmsForwarding()
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "recording_started")
+    }
+
+    private fun startRmsForwarding() {
+        rmsJob?.cancel()
+        rmsJob = scope.launch {
+            recorder.frames.collect { frame ->
+                withContext(Dispatchers.Main) {
+                    FlowAccessibilityService.instance?.overlayController?.pushRms(frame.rms)
+                }
+            }
+        }
     }
 
     private fun handleCommit() {
@@ -83,50 +109,62 @@ class RecordingForegroundService : Service() {
             return
         }
         captureJob = scope.launch {
-            val pcm = recorder.stop()
-            capturing = false
-            OpenFlowLog.d(
-                OpenFlowLog.Tag.FGS,
-                "pcm_collected",
-                mapOf("samples" to pcm.size, "durMs" to (pcm.size * 1000L / 16000L)),
-            )
-            val settings = settingsStore.current()
-            val asrStart = System.currentTimeMillis()
-            OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_start")
-            val raw = transcribe(pcm)
-            OpenFlowLog.d(
-                OpenFlowLog.Tag.ASR,
-                "asr_done",
-                mapOf(
-                    "textLen" to raw.length,
-                    "text" to raw.take(40),
-                    "durMs" to (System.currentTimeMillis() - asrStart),
-                ),
-            )
-            OpenFlowLog.d(
-                OpenFlowLog.Tag.LLM,
-                "polish_start",
-                mapOf("polishEnabled" to settings.polishEnabled),
-            )
-            val polishStart = System.currentTimeMillis()
-            val finalText = if (settings.polishEnabled) polish(raw, settings.llmModelId) else raw
-            OpenFlowLog.d(
-                OpenFlowLog.Tag.LLM,
-                "polish_done",
-                mapOf(
-                    "textLen" to finalText.length,
-                    "text" to finalText.take(40),
-                    "durMs" to (System.currentTimeMillis() - polishStart),
-                ),
-            )
-            if (finalText.isNotBlank()) insertIntoFocusedEditable(finalText)
-            OpenFlowLog.flush()
-            stopSelfSafely()
+            try {
+                val pcm = recorder.stop()
+                capturing = false
+                rmsJob?.cancel()
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.FGS,
+                    "pcm_collected",
+                    mapOf("samples" to pcm.size, "durMs" to (pcm.size * 1000L / 16000L)),
+                )
+                pushState(BallState.Transcribing)
+
+                val settings = settingsStore.current()
+                val asrStart = System.currentTimeMillis()
+                OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_start")
+                val raw = transcribe(pcm)
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.ASR,
+                    "asr_done",
+                    mapOf(
+                        "textLen" to raw.length,
+                        "text" to raw.take(40),
+                        "durMs" to (System.currentTimeMillis() - asrStart),
+                    ),
+                )
+
+                val polishStart = System.currentTimeMillis()
+                val finalText = if (settings.polishEnabled && raw.isNotBlank()) {
+                    pushState(BallState.Polishing)
+                    polish(raw, settings.llmModelId)
+                } else raw
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.LLM,
+                    "polish_done",
+                    mapOf(
+                        "polishEnabled" to settings.polishEnabled,
+                        "textLen" to finalText.length,
+                        "text" to finalText.take(40),
+                        "durMs" to (System.currentTimeMillis() - polishStart),
+                    ),
+                )
+
+                val result = runInsertion(finalText)
+                applyResult(result)
+            } catch (t: Throwable) {
+                OpenFlowLog.e(OpenFlowLog.Tag.FGS, "commit_failed", t)
+                applyResult(PipelineResult.Failed("处理失败:${t.javaClass.simpleName}"))
+            } finally {
+                OpenFlowLog.flush()
+                stopSelfSafely()
+            }
         }
     }
 
     private fun handleCancel() {
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "cancel_entered", mapOf("capturing" to capturing))
+        rmsJob?.cancel()
         if (capturing) {
             recorder.stop()
             capturing = false
@@ -176,7 +214,7 @@ class RecordingForegroundService : Service() {
         return engine.polish(text)
     }
 
-    private fun insertIntoFocusedEditable(text: String) {
+    private fun runInsertion(text: String): PipelineResult {
         OpenFlowLog.d(
             OpenFlowLog.Tag.INSERT,
             "insert_call",
@@ -185,6 +223,9 @@ class RecordingForegroundService : Service() {
                 "finalTextLen" to text.length,
             ),
         )
+        if (text.isBlank()) {
+            return decideOutcome(text = text, nodeAvailable = false, setTextOk = false, clipboardOk = true)
+        }
         val a11y = FlowAccessibilityService.instance
         val node = a11y?.currentEditableNode()
         val refreshOk = node?.let { runCatching { it.refresh() }.getOrDefault(false) }
@@ -202,17 +243,39 @@ class RecordingForegroundService : Service() {
                 "pkg" to node?.packageName,
             ),
         )
-        if (node == null) {
-            Log.w(TAG, "No editable node; skip insert")
-            return
-        }
-        val ok = TextInserter.insertAtCursor(node, text)
-        Log.d(TAG, "insert=$ok len=${text.length}")
+        val setTextOk = node?.let { TextInserter.insertAtCursor(it, text) } ?: false
+        OpenFlowLog.d(OpenFlowLog.Tag.INSERT, "insert_set_text", mapOf("ok" to setTextOk))
+        val needsClipboard = node == null || !setTextOk
+        val clipboardOk = if (needsClipboard) TextInserter.copyToClipboard(applicationContext, text) else true
+        val outcome = decideOutcome(
+            text = text,
+            nodeAvailable = node != null,
+            setTextOk = setTextOk,
+            clipboardOk = clipboardOk,
+        )
         OpenFlowLog.d(
             OpenFlowLog.Tag.INSERT,
-            "insert_done",
-            mapOf("ok" to ok, "textLen" to text.length),
+            "insert_outcome",
+            mapOf("outcome" to outcome::class.simpleName),
         )
+        return outcome
+    }
+
+    private suspend fun applyResult(result: PipelineResult) {
+        val state = ballStateFor(result)
+        val pill = pillFor(result)
+        withContext(Dispatchers.Main) {
+            val controller = FlowAccessibilityService.instance?.overlayController
+                ?: return@withContext
+            controller.setBallState(state)
+            if (pill != null) controller.showPill(pill)
+        }
+    }
+
+    private suspend fun pushState(state: BallState) {
+        withContext(Dispatchers.Main) {
+            FlowAccessibilityService.instance?.overlayController?.setBallState(state)
+        }
     }
 
     private fun stopSelfSafely() {
@@ -228,6 +291,7 @@ class RecordingForegroundService : Service() {
             mapOf("captureJobActive" to (captureJob?.isActive == true)),
         )
         OpenFlowLog.flush()
+        rmsJob?.cancel()
         captureJob?.cancel()
         scope.cancel()
         super.onDestroy()
