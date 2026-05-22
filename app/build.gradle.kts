@@ -1,10 +1,45 @@
+import java.util.Properties
+import org.gradle.api.GradleException
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
 
+val versionProps = Properties().also { props ->
+    rootProject.file("version.properties").inputStream().use { stream -> props.load(stream) }
+}
+val appVersionCode: Int = versionProps.getProperty("versionCode")?.toIntOrNull()
+    ?: throw GradleException("version.properties: versionCode missing or invalid")
+val appVersionName: String = versionProps.getProperty("versionName")
+    ?: throw GradleException("version.properties: versionName missing")
+
+val releaseSigningEnvironmentVariables = listOf(
+    "ANDROID_RELEASE_KEYSTORE_PATH",
+    "ANDROID_RELEASE_STORE_PASSWORD",
+    "ANDROID_RELEASE_KEY_ALIAS",
+    "ANDROID_RELEASE_KEY_PASSWORD",
+)
+
+val releaseSigningRequested = gradle.startParameter.taskNames.any { taskName ->
+    val normalizedTaskName = taskName.substringAfterLast(':')
+    normalizedTaskName.equals("assembleRelease", ignoreCase = true) ||
+        normalizedTaskName.equals("bundleRelease", ignoreCase = true) ||
+        normalizedTaskName.equals("packageRelease", ignoreCase = true) ||
+        normalizedTaskName.equals("build", ignoreCase = true) ||
+        normalizedTaskName.endsWith("Release", ignoreCase = true)
+}
+
+fun requiredReleaseSigningEnv(name: String): String =
+    providers.environmentVariable(name).orNull
+        ?: throw org.gradle.api.GradleException(
+            "Missing release signing environment variable: $name. " +
+                "Set ${releaseSigningEnvironmentVariables.joinToString()} before running a release build."
+        )
+
 android {
     namespace = "com.hank.flow.open"
+    base.archivesName = "OpenFlow"
     compileSdk = 35
     ndkVersion = "29.0.14206865"
 
@@ -12,12 +47,8 @@ android {
         applicationId = "com.hank.flow.open"
         minSdk = 31
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-alpha"
-
-        ndk {
-            abiFilters += listOf("arm64-v8a", "x86_64")
-        }
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         externalNativeBuild {
             cmake {
@@ -26,6 +57,17 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_ARM_NEON=ON",
                 )
+            }
+        }
+    }
+
+    signingConfigs {
+        create("release") {
+            if (releaseSigningRequested) {
+                storeFile = file(requiredReleaseSigningEnv("ANDROID_RELEASE_KEYSTORE_PATH"))
+                storePassword = requiredReleaseSigningEnv("ANDROID_RELEASE_STORE_PASSWORD")
+                keyAlias = requiredReleaseSigningEnv("ANDROID_RELEASE_KEY_ALIAS")
+                keyPassword = requiredReleaseSigningEnv("ANDROID_RELEASE_KEY_PASSWORD")
             }
         }
     }
@@ -42,11 +84,22 @@ android {
             isMinifyEnabled = false
         }
         release {
-            isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = false
         }
     }
 

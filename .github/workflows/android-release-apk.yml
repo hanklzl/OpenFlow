@@ -1,0 +1,363 @@
+name: Android Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  build-release-apk:
+    name: Build Release APK
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    outputs:
+      apk-arm64-name: ${{ steps.name-apk.outputs.apk_arm64_v8a_name }}
+      apk-arm64-sha256: ${{ steps.apk-meta.outputs.sha256_arm64_v8a }}
+      apk-arm64-size: ${{ steps.apk-meta.outputs.size_arm64_v8a }}
+      apk-x86-64-name: ${{ steps.name-apk.outputs.apk_x86_64_name }}
+      apk-x86-64-sha256: ${{ steps.apk-meta.outputs.sha256_x86_64 }}
+      apk-x86-64-size: ${{ steps.apk-meta.outputs.size_x86_64 }}
+      mapping-name: ${{ steps.pack-mapping.outputs.mapping_name }}
+      mapping-sha256: ${{ steps.pack-mapping.outputs.mapping_sha256 }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Validate version consistency
+        if: github.ref_type == 'tag'
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          actual=$(awk -F= '/^versionName/{print $2}' version.properties | tr -d '[:space:]')
+          [ "$expected" = "$actual" ] || {
+            echo "::error::tag $GITHUB_REF_NAME vs versionName $actual mismatch"
+            exit 1
+          }
+          echo "OK: $GITHUB_REF_NAME ↔ versionName=$actual"
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4.0.1
+
+      - name: Install Android NDK 29.0.14206865
+        run: |
+          set -euxo pipefail
+          yes | sdkmanager --install \
+            "ndk;29.0.14206865" \
+            "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Validate release secrets
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          LOGAN_AES_KEY: ${{ secrets.LOGAN_AES_KEY }}
+          LOGAN_AES_IV: ${{ secrets.LOGAN_AES_IV }}
+        run: |
+          missing=0
+          for name in \
+            ANDROID_RELEASE_KEYSTORE_BASE64 \
+            ANDROID_RELEASE_STORE_PASSWORD \
+            ANDROID_RELEASE_KEY_ALIAS \
+            ANDROID_RELEASE_KEY_PASSWORD \
+            LOGAN_AES_KEY \
+            LOGAN_AES_IV
+          do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured in the GitHub release Environment"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Decode release keystore
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          chmod 600 "$RUNNER_TEMP/release.jks"
+
+      - name: Run release lint
+        run: ./gradlew lint --no-daemon
+
+      - name: Build Release APK
+        env:
+          ANDROID_RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          LOGAN_AES_KEY: ${{ secrets.LOGAN_AES_KEY }}
+          LOGAN_AES_IV: ${{ secrets.LOGAN_AES_IV }}
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Name APKs
+        id: name-apk
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag_or_label="$GITHUB_REF_NAME"
+          else
+            tag_or_label="manual-${GITHUB_RUN_NUMBER}"
+          fi
+          arm_src="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
+          x64_src="app/build/outputs/apk/release/OpenFlow-x86_64-release.apk"
+          if [ ! -f "$arm_src" ] || [ ! -f "$x64_src" ]; then
+            echo "::error::expected per-ABI APKs not produced; saw:"
+            ls -la app/build/outputs/apk/release/
+            exit 1
+          fi
+          arm_name="OpenFlow-${tag_or_label}-arm64-v8a.apk"
+          x64_name="OpenFlow-${tag_or_label}-x86_64.apk"
+          cp "$arm_src" "$RUNNER_TEMP/$arm_name"
+          cp "$x64_src" "$RUNNER_TEMP/$x64_name"
+          {
+            echo "apk_arm64_v8a_name=$arm_name"
+            echo "apk_x86_64_name=$x64_name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute APK sha256 + size
+        id: apk-meta
+        run: |
+          arm_apk="$RUNNER_TEMP/${{ steps.name-apk.outputs.apk_arm64_v8a_name }}"
+          x64_apk="$RUNNER_TEMP/${{ steps.name-apk.outputs.apk_x86_64_name }}"
+          {
+            echo "sha256_arm64_v8a=$(sha256sum "$arm_apk" | awk '{print $1}')"
+            echo "size_arm64_v8a=$(wc -c < "$arm_apk")"
+            echo "sha256_x86_64=$(sha256sum "$x64_apk" | awk '{print $1}')"
+            echo "size_x86_64=$(wc -c < "$x64_apk")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Pack mapping
+        id: pack-mapping
+        if: github.ref_type == 'tag'
+        run: |
+          mapping_src="app/build/outputs/mapping/release/mapping.txt"
+          if [ ! -f "$mapping_src" ]; then
+            echo "::error::expected mapping.txt not produced at $mapping_src"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/mapping"
+          cp "$mapping_src" "$RUNNER_TEMP/mapping/"
+          mapping_name="mapping-${GITHUB_REF_NAME}.zip"
+          (cd "$RUNNER_TEMP" && zip -9q "$mapping_name" mapping/mapping.txt)
+          sha=$(sha256sum "$RUNNER_TEMP/$mapping_name" | awk '{print $1}')
+          {
+            echo "mapping_name=$mapping_name"
+            echo "mapping_sha256=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload Release APK artifact (arm64-v8a)
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenFlow-release-apk-arm64-v8a
+          path: ${{ runner.temp }}/${{ steps.name-apk.outputs.apk_arm64_v8a_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Release APK artifact (x86_64)
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenFlow-release-apk-x86_64
+          path: ${{ runner.temp }}/${{ steps.name-apk.outputs.apk_x86_64_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload mapping artifact
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenFlow-release-mapping
+          path: ${{ runner.temp }}/${{ steps.pack-mapping.outputs.mapping_name }}
+          if-no-files-found: error
+          retention-days: 90
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: build-release-apk
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Download Release APK artifact (arm64-v8a)
+        uses: actions/download-artifact@v7
+        with:
+          name: OpenFlow-release-apk-arm64-v8a
+          path: release-apk-arm64
+
+      - name: Download Release APK artifact (x86_64)
+        uses: actions/download-artifact@v7
+        with:
+          name: OpenFlow-release-apk-x86_64
+          path: release-apk-x86_64
+
+      - name: Download mapping artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: OpenFlow-release-mapping
+          path: release-mapping
+
+      - name: Generate release notes
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null \
+                 || git rev-list --max-parents=0 HEAD | tail -1)
+          bash scripts/release/generate-notes.sh "$prev" "$GITHUB_REF_NAME" > release_notes.md
+          # 追加构建产物矩阵
+          arm_apk="${{ needs.build-release-apk.outputs.apk-arm64-name }}"
+          x64_apk="${{ needs.build-release-apk.outputs.apk-x86-64-name }}"
+          map_zip="${{ needs.build-release-apk.outputs.mapping-name }}"
+          arm_size_human=$(numfmt --to=iec --suffix=B "${{ needs.build-release-apk.outputs.apk-arm64-size }}")
+          x64_size_human=$(numfmt --to=iec --suffix=B "${{ needs.build-release-apk.outputs.apk-x86-64-size }}")
+          arm_sha_short=$(echo "${{ needs.build-release-apk.outputs.apk-arm64-sha256 }}" | cut -c1-12)
+          x64_sha_short=$(echo "${{ needs.build-release-apk.outputs.apk-x86-64-sha256 }}" | cut -c1-12)
+          map_sha_short=$(echo "${{ needs.build-release-apk.outputs.mapping-sha256 }}" | cut -c1-12)
+          {
+            echo ""
+            echo "### 构建产物"
+            echo ""
+            echo "- arm64-v8a: \`${arm_apk}\` · ${arm_size_human} · sha256 \`${arm_sha_short}\`"
+            echo "- x86_64: \`${x64_apk}\` · ${x64_size_human} · sha256 \`${x64_sha_short}\`"
+            echo "- mapping: \`${map_zip}\` · sha256 \`${map_sha_short}\` (R8 反混淆用)"
+          } >> release_notes.md
+          head -60 release_notes.md
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: release_notes.md
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Prepend CHANGELOG.md and push main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          bash scripts/release/prepend-changelog.sh release_notes.md "$GITHUB_REF_NAME"
+          git add CHANGELOG.md
+          git commit -m "docs(changelog): release $GITHUB_REF_NAME [skip ci]"
+          if ! git push origin main; then
+            git pull --rebase origin main
+            git push origin main || echo "::warning::CHANGELOG push failed, manual sync required"
+          fi
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          arm_path="release-apk-arm64/${{ needs.build-release-apk.outputs.apk-arm64-name }}"
+          x64_path="release-apk-x86_64/${{ needs.build-release-apk.outputs.apk-x86-64-name }}"
+          map_path="release-mapping/${{ needs.build-release-apk.outputs.mapping-name }}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$map_path" --clobber
+            gh release edit "$GITHUB_REF_NAME" --notes-file release_notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$map_path" \
+              --title "$GITHUB_REF_NAME" \
+              --notes-file release_notes.md
+          fi
+
+  publish-version-manifest:
+    name: Publish version manifest
+    needs: [build-release-apk, publish-github-release]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source at tag
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          path: source
+          ref: ${{ github.ref }}
+
+      - name: Checkout gh-pages (if exists)
+        uses: actions/checkout@v6
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages
+
+      - name: Init gh-pages if missing
+        run: |
+          if [ ! -d gh-pages/.git ]; then
+            git clone --branch main "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
+            cd gh-pages
+            git checkout --orphan gh-pages
+            git rm -rf . 2>/dev/null || true
+            echo "Release manifest branch" > README.md
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "chore: init gh-pages"
+          fi
+
+      - name: Download release notes artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: release-notes
+          path: source
+
+      - name: Build version.json
+        run: |
+          mkdir -p gh-pages/release
+          vcode=$(awk -F= '/^versionCode/{print $2}' source/version.properties | tr -d '[:space:]')
+          bash source/scripts/release/build-version-json.sh \
+              --version "${GITHUB_REF_NAME#v}" \
+              --version-code "$vcode" \
+              --tag "$GITHUB_REF_NAME" \
+              --variant "arm64-v8a=${{ needs.build-release-apk.outputs.apk-arm64-name }},${{ needs.build-release-apk.outputs.apk-arm64-sha256 }},${{ needs.build-release-apk.outputs.apk-arm64-size }}" \
+              --variant "x86_64=${{ needs.build-release-apk.outputs.apk-x86-64-name }},${{ needs.build-release-apk.outputs.apk-x86-64-sha256 }},${{ needs.build-release-apk.outputs.apk-x86-64-size }}" \
+              --mapping-name "${{ needs.build-release-apk.outputs.mapping-name }}" \
+              --mapping-sha256 "${{ needs.build-release-apk.outputs.mapping-sha256 }}" \
+              --notes source/release_notes.md \
+              > gh-pages/release/version.json
+          jq . gh-pages/release/version.json
+
+      - name: Commit & push gh-pages
+        run: |
+          cd gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release/version.json
+          git commit -m "chore(release): publish ${GITHUB_REF_NAME}"
+          git push origin gh-pages

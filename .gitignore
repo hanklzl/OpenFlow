@@ -12,5 +12,6 @@ captures/
 *.aab
 *.keystore
 *.jks
+.env.release.local
 app/release/
 tools/logan/out/
