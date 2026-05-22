@@ -4,7 +4,7 @@
 
 ## 项目概览
 
-OpenFlow 是一个**类 Typeless Flow 的 Android 语音输入助手**：在任意 App 输入框获得焦点时显示悬浮球，长按悬浮球录音，使用 **whisper.cpp 离线 ASR** 转写，可选用 **llama.cpp + Qwen2.5/Qwen3.5 端侧 LLM** 做口语到书面表达的润色，最后通过无障碍服务把文本写入光标位置。
+OpenFlow 是一个**类 Typeless Flow 的 Android 语音输入助手**：在任意 App 输入框获得焦点时显示悬浮球，长按悬浮球录音，使用 **whisper.cpp 离线 ASR** 转写，可选用 **llama.cpp + Qwen2.5/Qwen3 端侧 LLM** 做口语到书面表达的润色，最后通过无障碍服务把文本写入光标位置。
 
 包名 `com.hank.flow.open`，目标 Android 12+ (minSdk 31)。
 
@@ -205,7 +205,7 @@ app/src/main/
 
 ## 当前优先事项（长期有效）
 
-1. 在真机上验证 Qwen2.5-1.5B / Qwen3.5-2B / Qwen3.5-0.8B 三个 LLM 选项的实际下载路径与推理质量。
+1. 在真机上验证 Qwen2.5-1.5B / Qwen3-1.7B / Qwen3-0.6B 三个 LLM 选项的实际下载路径与推理质量。
 2. 完善 `FloatingBallView` 的实时波形可视化（已有 `Frame.rms` 数据流，只是没接到 view）。
 3. 完善"识别后手动编辑确认"卡片（设置项已就位）。
 4. Release 构建 + R8 + `@Keep` JNI 类的 ProGuard 规则。

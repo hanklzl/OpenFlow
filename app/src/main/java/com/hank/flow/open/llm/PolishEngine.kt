@@ -6,7 +6,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-class PolishEngine(private val modelPath: String) {
+class PolishEngine(
+    private val modelPath: String,
+    private val isQwen3: Boolean = false,
+) {
 
     private val mutex = Mutex()
     @Volatile private var handle: Long = 0L
@@ -23,7 +26,7 @@ class PolishEngine(private val modelPath: String) {
     suspend fun polish(rawText: String): String {
         if (rawText.isBlank()) return rawText
         if (!ensureLoaded()) return rawText
-        val prompt = PolishPrompt.build(rawText)
+        val prompt = PolishPrompt.build(rawText, appendNoThink = isQwen3)
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 runCatching {

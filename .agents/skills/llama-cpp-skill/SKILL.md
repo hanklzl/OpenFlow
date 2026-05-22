@@ -105,10 +105,11 @@ Android 上 llama.cpp 没有靠谱的 GPU 后端（OpenCL/Vulkan 都未在 llama
 | ID | 大小 (Q4_K_M) | 速度 (8 Gen 2) | 中文润色质量 |
 |---|---|---|---|
 | `qwen2.5-1.5b-instruct-q4_k_m` (默认) | 1.1 GB | 8-15 tokens/s | 优秀 |
-| `qwen3.5-2b-instruct-q4_k_m` | 1.4 GB | 6-12 tokens/s | 优秀+（更新数据） |
-| `qwen3.5-0.8b-instruct-q4_k_m` | 0.6 GB | 15-25 tokens/s | 良好 |
+| `qwen3-1.7b-q4_k_m` | 1.1 GB | 7-13 tokens/s | 优秀+（更新数据） |
+| `qwen3-0.6b-q4_k_m` | 0.4 GB | 18-28 tokens/s | 良好 |
 
-> Qwen3.5 系列的 GGUF 仓库路径基于 Qwen 团队常规命名约定填写；实际仓库名若不同首次下载会 404，那时只需改 `ModelCatalog.kt` 中的 `hfPath`。
+> Qwen3 小模型在官方 `Qwen/Qwen3-*-GGUF` 仓库只发了 Q8_0；Q4_K_M 取自社区维护 `unsloth/Qwen3-*-GGUF`。
+> Qwen3 默认开启 thinking 模式，本仓库通过 `PolishPrompt.build(appendNoThink = isQwen3)` 在 user 段末尾追加 `/no_think` 关闭它；新增 Qwen3 系列模型时，构造 `PolishEngine` 必须把 `isQwen3` 设为 `model.id.startsWith("qwen3-")`。
 
 ## 调参建议（针对润色任务）
 

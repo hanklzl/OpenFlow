@@ -220,7 +220,10 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                                 if (polishThisRun && llmReady && rawText.isNotBlank()) {
                                     polishRunning = true
                                     val p0 = System.currentTimeMillis()
-                                    val polishEngine = PolishEngine(store.pathFor(llmModel).absolutePath)
+                                    val polishEngine = PolishEngine(
+                                        modelPath = store.pathFor(llmModel).absolutePath,
+                                        isQwen3 = llmModel.id.startsWith("qwen3-"),
+                                    )
                                     polishedText = polishEngine.polish(rawText)
                                     polishLatencyMs = System.currentTimeMillis() - p0
                                     polishRunning = false

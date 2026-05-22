@@ -1,7 +1,7 @@
 package com.hank.flow.open.llm
 
 /**
- * Qwen2.5 chat template for transcript polishing.
+ * Qwen ChatML template for transcript polishing.
  * Keeps the system role focused on fidelity: do not add content, do not
  * change semantics — only clean disfluencies and improve readability.
  */
@@ -16,9 +16,14 @@ object PolishPrompt {
         - 直接输出润色后的纯文本，不要任何前缀、引号或解释。
     """.trimIndent()
 
-    fun build(rawTranscript: String): String = buildString {
+    // appendNoThink: 仅对 Qwen3 系列追加 /no_think，关闭其默认 thinking 模式，
+    // 避免 <think>…</think> 占满 MAX_NEW_TOKENS 预算。Qwen2.5 不识别该指令，
+    // 因此不能无条件附加。
+    fun build(rawTranscript: String, appendNoThink: Boolean = false): String = buildString {
         append("<|im_start|>system\n").append(SYSTEM).append("<|im_end|>\n")
-        append("<|im_start|>user\n").append(rawTranscript).append("<|im_end|>\n")
+        append("<|im_start|>user\n").append(rawTranscript)
+        if (appendNoThink) append("\n/no_think")
+        append("<|im_end|>\n")
         append("<|im_start|>assistant\n")
     }
 }

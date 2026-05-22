@@ -71,7 +71,7 @@ if (final.isNotBlank()) insertIntoFocusedEditable(final)
 
 ### MUST NOT: 模型切换不重启 FGS
 
-切换 LLM 模型（例如从 Qwen2.5-1.5B 切到 Qwen3.5-0.8B）后，`PolishEngine` 必须重建。当前实现：
+切换 LLM 模型（例如从 Qwen2.5-1.5B 切到 Qwen3-0.6B）后，`PolishEngine` 必须重建。当前实现：
 ```kotlin
 private var polishEngine: PolishEngine? = null
 ```

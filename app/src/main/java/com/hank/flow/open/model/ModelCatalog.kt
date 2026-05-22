@@ -45,21 +45,21 @@ object ModelCatalog {
     )
 
     val llmLargerNewer = ModelEntry(
-        id = "qwen3.5-2b-instruct-q4_k_m",
+        id = "qwen3-1.7b-q4_k_m",
         kind = ModelKind.Llm,
-        displayName = "Qwen3.5 2B Instruct (Q4_K_M) — 更新更强",
-        sizeBytes = 1_400_000_000L,
+        displayName = "Qwen3 1.7B (Q4_K_M) — 更新更强",
+        sizeBytes = 1_107_409_472L,
         sha256 = "",
-        hfPath = "Qwen/Qwen3.5-2B-Instruct-GGUF/resolve/main/qwen3.5-2b-instruct-q4_k_m.gguf",
+        hfPath = "unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
     )
 
     val llmTinyNewer = ModelEntry(
-        id = "qwen3.5-0.8b-instruct-q4_k_m",
+        id = "qwen3-0.6b-q4_k_m",
         kind = ModelKind.Llm,
-        displayName = "Qwen3.5 0.8B Instruct (Q4_K_M) — 轻量",
-        sizeBytes = 600_000_000L,
+        displayName = "Qwen3 0.6B (Q4_K_M) — 轻量",
+        sizeBytes = 396_705_472L,
         sha256 = "",
-        hfPath = "Qwen/Qwen3.5-0.8B-Instruct-GGUF/resolve/main/qwen3.5-0.8b-instruct-q4_k_m.gguf",
+        hfPath = "unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",
     )
 
     val all: List<ModelEntry> = listOf(

@@ -169,8 +169,10 @@ class RecordingForegroundService : Service() {
             Log.w(TAG, "LLM model not ready: ${model.id}")
             return text
         }
-        val engine = polishEngine ?: PolishEngine(modelStore.pathFor(model).absolutePath)
-            .also { polishEngine = it }
+        val engine = polishEngine ?: PolishEngine(
+            modelPath = modelStore.pathFor(model).absolutePath,
+            isQwen3 = model.id.startsWith("qwen3-"),
+        ).also { polishEngine = it }
         return engine.polish(text)
     }
 
