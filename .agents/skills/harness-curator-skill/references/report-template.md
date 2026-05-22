@@ -4,35 +4,67 @@
 # Harness Curate Report — YYYY-MM-DD
 
 ## Summary
-- 盘点范围：commits <range> + memory <snapshot date>
-- 漂移条目：N (P0 = m, P1 = k)
-- 候选 incidents：j
-- 候选 rule patches：i
 
-## 漂移条目
+- 盘点范围：commits <range> + memory snapshot <date>
+- Drift fixes：N (P0 = m, P1 = k)
+- Memory compaction：a (合并 c / 提炼 p / 归类 r / 冲突标记 nd)
+- Memory retract：b
+- Memory promote：g (rules += i, incidents += j)
+- Verified-at refresh：v
+- Confidence bump：u
+- AGENTS.md baseline 校对：（变化条目，若有）
 
-### [P0] <area>: <one-line>
+## Drift Fixes
+
+### [P0/P1] <area>: <one-line>
 - Rule: `docs/dev-harness/<area>/rules.md#<anchor>`
 - Code fact: `<file>:<line>` (commit `<sha>`)
 - Mismatch: <短描述>
-- 建议 patch:
-  ```diff
-  - 旧
-  + 新
-  ```
+- 修复 commit: `<sha>`（`docs(harness): fix drift ...`）
 
-## 候选 incidents
+## Memory Compaction
 
-### INC-<AREA>-<NNNN> — <one-line>
-- 触发：<事件 / 多次回归>
-- Root cause: <短描述>
-- Guard：grep / contract test / rule.md 增条
-- 建议文档：`docs/dev-harness/incidents/INC-<AREA>-<NNNN>.md`
+| 操作 | MEM-ID | 一句话 | commit |
+|---|---|---|---|
+| compact | MEM-NATIVE-0003 absorbs MEM-NATIVE-0007 | ggml 重定义两条合并 | `<sha>` |
+| summarize | MEM-PIPELINE-0001 | 正文 > 200 行，提取 .long.md | `<sha>` |
+| classify | MEM-XXX from candidates → pitfalls | …… | `<sha>` |
 
-## 候选 rule patches
-（同上 patch 列表，集中归档便于一次合入）
+## Memory Retract
 
-## 不变量保持
-- [ ] 本 REPORT 没有直接修改 `docs/dev-harness/`
-- [ ] 所有 patch 都是 unified diff，可直接 `git apply`
+| MEM-ID | 原因 | commit |
+|---|---|---|
+| MEM-NATIVE-0005 | NDK r29 升级后已不复现 | `<sha>` |
+
+## Memory Promote
+
+### rules.md 新增
+
+| MEM-ID | 目的地 | commit A (rule) | commit B (memory mark) |
+|---|---|---|---|
+
+### incidents/index.md 新增
+
+| MEM-ID | INC-ID | commit A | commit B |
+|---|---|---|---|
+
+## Deferred
+
+本次因上限未处理的：
+
+- 晋升候选：N 条（详见单独清单）
+- compact 候选：M 条
+- 留到下次 curate 处理
+
+## 待决议（needs-decision）
+
+| MEM-ID-A | MEM-ID-B | 冲突点 |
+|---|---|---|
+
+## 校验
+
+- [ ] 所有 commit 都遵循 `docs(harness): ...` / `docs(memory): ...` / `docs(agents): ...` 格式
+- [ ] 每条 promote 都有"A: 改 rules/incidents" + "B: 改 memory entry" 两个 commit
+- [ ] 每条 retract 的源文件已 `git mv` 到 `memory/_retracted/`
+- [ ] 单次上限未被突破（见 SKILL.md "不变约束"）
 ```

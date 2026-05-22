@@ -40,6 +40,7 @@ OpenFlow 是一个**类 Typeless Flow 的 Android 语音输入助手**：在任�
 
 - 强约束：`docs/dev-harness/<area>/rules.md`
 - 历史踩坑：`docs/dev-harness/incidents/index.md`（按 ID 反查到 area + rule + guard）
+- **agent 自动暂存层**：`docs/dev-harness/memory/`（由 `memory-sediment-skill` 在开发收尾时写入；由 `harness-curator-skill` 自主合入到 rules / incidents。详见 [`docs/dev-harness/memory/README.md`](docs/dev-harness/memory/README.md)）
 - AI 工作流：见 `.agents/skills/<area>-skill/`，软链到 `.claude/skills/`、`.codex/skills/`
 - 历史决策快照：`docs/superpowers/specs/` 与 `plans/`（仅参考，不是当前规则源）
 - 个人会话偏好（Claude Code only）：`~/.claude/projects/.../memory/MEMORY.md`，不进仓库
@@ -219,6 +220,8 @@ app/src/main/
 5. 涉及悬浮球 / 无障碍 / FGS 时必须真机跑通至少一次
 6. 先做运行态验收，再给出完成结论
 7. 将过程中的错误和修正沉淀到 `docs/dev-harness/incidents/`
+8. 会话收尾时由 [`memory-sediment-skill`](.agents/skills/memory-sediment-skill/SKILL.md) 评估是否往 `docs/dev-harness/memory/` 沉淀本次新发现（架构理解 / 踩过的坑 / 编码规范）；判定规则与去重见该 skill 的 references
+9. 定期由 [`harness-curator-skill`](.agents/skills/harness-curator-skill/SKILL.md) 审计漂移、压缩 memory、晋升稳定条目到 rules / incidents——**agent 自主合入**，细粒度 commit，可 `git revert` 回滚
 
 ## 分析规则
 
