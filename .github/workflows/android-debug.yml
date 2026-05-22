@@ -36,7 +36,7 @@ jobs:
       - name: Install Android NDK 29.0.14206865
         run: |
           set -euxo pipefail
-          yes | sdkmanager --install \
+          (yes || true) | sdkmanager --install \
             "ndk;29.0.14206865" \
             "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
