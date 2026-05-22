@@ -57,7 +57,11 @@ Java_com_hank_flow_open_asr_WhisperJni_nativeTranscribe(JNIEnv *env, jobject /*t
     params.print_special = false;
     params.print_timestamps = false;
     params.suppress_blank = true;
-    params.n_threads = 4;
+    // Diagnostic: n_threads forced to 1 to test whether NDK r29 + whisper.cpp/ggml
+    // multi-thread synchronization is responsible for the post-record ASR hang
+    // observed on Xiaomi 13 (Android 16, SDK 36). Revert to 4 once root cause is
+    // confirmed and properly fixed.
+    params.n_threads = 1;
 
     const int rc = whisper_full(ctx, params, samples.data(), static_cast<int>(samples.size()));
     env->ReleaseStringUTFChars(jLanguage, language);
