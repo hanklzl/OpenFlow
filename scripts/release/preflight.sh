@@ -69,7 +69,12 @@ else
 fi
 
 echo "[dry] Generate release notes"
-prev=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD | tail -1)
+# 优先用祖先链上的最近 tag；若当前 tag 不在祖先链上（如上次 release 的 hotfix 留在 release 分支没回流），fallback 到字面最近的 vX.Y.Z；都没有再回根 commit
+prev=$(git describe --tags --abbrev=0 2>/dev/null) || true
+if [ -z "$prev" ]; then
+    prev=$(git tag --list 'v*' --sort=-v:refname | grep -vFx "$tag" | head -1)
+fi
+prev=${prev:-$(git rev-list --max-parents=0 HEAD | tail -1)}
 notes="/tmp/release_notes-${tag}.md"
 bash scripts/release/generate-notes.sh "$prev" HEAD > "$notes"
 echo "  notes -> $notes"

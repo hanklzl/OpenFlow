@@ -230,8 +230,12 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null \
-                 || git rev-list --max-parents=0 HEAD | tail -1)
+          # 优先用祖先链上的最近 tag；若当前 tag 不在 main 祖先链上（例如上次 release 的 hotfix 留在 release 分支没回流），fallback 到字面最近的 vX.Y.Z；都没有再回根 commit
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null) || true
+          if [ -z "$prev" ]; then
+            prev=$(git tag --list 'v*' --sort=-v:refname | grep -vFx "${GITHUB_REF_NAME}" | head -1)
+          fi
+          prev=${prev:-$(git rev-list --max-parents=0 HEAD | tail -1)}
           bash scripts/release/generate-notes.sh "$prev" "$GITHUB_REF_NAME" > release_notes.md
           # 追加构建产物矩阵
           arm_apk="${{ needs.build-release-apk.outputs.apk-arm64-name }}"
