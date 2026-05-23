@@ -14,6 +14,18 @@ set(GGML_BACKEND_DL                OFF CACHE BOOL "" FORCE)
 set(GGML_CPU_ALL_VARIANTS          OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP                    OFF CACHE BOOL "" FORCE)
 
+# Phase 1: pin a minimum ARM baseline that includes dotprod (SDOT / UDOT).
+# armv8.2-a+dotprod is supported by every arm64 Android device sold since 2018
+# (Cortex-A55/A75/A76 and newer; Snapdragon 845+, every Tensor, every Dimensity).
+# This lets ggml-cpu's Q4_K_M / Q5_K_M GEMM kernels light up the dotprod path
+# (gated on __ARM_FEATURE_DOTPROD). i8mm (ARMv8.6) is *not* enabled here —
+# it's still rare outside flagship chips and would crash with SIGILL on older
+# devices. Only applies to the arm64-v8a APK split; x86_64 (emulator) is
+# unaffected because this branch is guarded by CMAKE_SYSTEM_PROCESSOR.
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod" CACHE STRING "" FORCE)
+endif()
+
 set(LLAMA_BUILD_TESTS              OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES           OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS              OFF CACHE BOOL "" FORCE)

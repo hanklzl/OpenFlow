@@ -57,6 +57,16 @@ Java_com_hank_flow_open_asr_WhisperJni_nativeTranscribe(JNIEnv *env, jobject /*t
     params.print_special = false;
     params.print_timestamps = false;
     params.suppress_blank = true;
+    // Phase 1 low-risk parameter tightening: deterministic single-pass decoding.
+    params.no_context = true;
+    params.suppress_nst = true;
+    params.temperature = 0.0f;
+    params.greedy.best_of = 1;
+    params.beam_search.beam_size = 1;
+    // For typical voice-input clips (≤25 s) we want a single segment to skip
+    // segment-loop bookkeeping. Long clips keep the default to preserve quality.
+    const int sampleRateHz = WHISPER_SAMPLE_RATE; // 16000
+    params.single_segment = (n <= 25 * sampleRateHz);
     // Diagnostic: n_threads forced to 1 to test whether NDK r29 + whisper.cpp/ggml
     // multi-thread synchronization is responsible for the post-record ASR hang
     // observed on Xiaomi 13 (Android 16, SDK 36). Revert to 4 once root cause is

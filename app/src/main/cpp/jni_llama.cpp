@@ -77,8 +77,10 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = static_cast<uint32_t>(ctxSize);
-    cparams.n_batch = 64;
-    cparams.n_ubatch = 16;
+    // Phase 1: bigger batch/ubatch so the ~100-token system+user prefill
+    // fits in a single decode call instead of being chunked.
+    cparams.n_batch = 256;
+    cparams.n_ubatch = 64;
     cparams.n_threads = 4;
     cparams.n_threads_batch = 4;
 
@@ -123,25 +125,24 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
     llama_memory_t mem = llama_get_memory(h->ctx);
     llama_memory_clear(mem, /*data=*/true);
 
-    // Feed prompt in chunks of n_batch.
-    const int batchSize = 16;
+    // Feed prompt in chunks of n_batch. Per-chunk timing is aggregated and
+    // logged once after the whole prefill completes.
+    const int batchSize = 64;
     int pos = 0;
+    int chunkCount = 0;
     const long long promptDecodeStartMs = nowMs();
     while (pos < (int)tokens.size()) {
         const int chunk = std::min(batchSize, (int)tokens.size() - pos);
-        const long long chunkStartMs = nowMs();
-        LOGI("nativeGenerate prompt_decode_start pos=%d chunk=%d", pos, chunk);
         llama_batch batch = llama_batch_get_one(&tokens[pos], chunk);
         if (llama_decode(h->ctx, batch) != 0) {
             LOGE("decode failed at pos=%d", pos);
             return env->NewStringUTF("");
         }
         pos += chunk;
-        LOGI("nativeGenerate prompt_decode_done pos=%d durMs=%lld",
-             pos, nowMs() - chunkStartMs);
+        ++chunkCount;
     }
-    LOGI("nativeGenerate prompt_decode_all_done durMs=%lld",
-         nowMs() - promptDecodeStartMs);
+    LOGI("nativeGenerate prompt_decode_all_done tokens=%zu chunks=%d durMs=%lld",
+         tokens.size(), chunkCount, nowMs() - promptDecodeStartMs);
 
     // Build sampler chain.
     auto sparams = llama_sampler_chain_default_params();
@@ -163,28 +164,29 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
 
     const long long generateStartMs = nowMs();
     long long firstTokenMs = -1;
+    int generatedTokens = 0;
+    bool eogReached = false;
     for (int i = 0; i < maxNewTokens; ++i) {
-        const long long tokenStartMs = nowMs();
         llama_token id = llama_sampler_sample(sampler, h->ctx, -1);
         if (llama_vocab_is_eog(h->vocab, id)) {
-            LOGI("nativeGenerate eog step=%d durMs=%lld", i, nowMs() - tokenStartMs);
+            eogReached = true;
             break;
         }
 
         if (firstTokenMs < 0) firstTokenMs = nowMs() - generateStartMs;
         out += tokenToString(h->vocab, id);
+        ++generatedTokens;
 
         llama_batch one = llama_batch_get_one(&id, 1);
         if (llama_decode(h->ctx, one) != 0) {
-            LOGE("decode failed during generation");
+            LOGE("decode failed during generation step=%d", i);
             break;
         }
-        LOGI("nativeGenerate token_done step=%d durMs=%lld outBytes=%zu",
-             i + 1, nowMs() - tokenStartMs, out.size());
     }
     const long long decodeMs = nowMs() - generateStartMs;
-    LOGI("nativeGenerate done outBytes=%zu prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
-         out.size(), prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
+    LOGI("nativeGenerate done outBytes=%zu tokens=%d eog=%d prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
+         out.size(), generatedTokens, eogReached ? 1 : 0,
+         prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
 
     llama_sampler_free(sampler);
 
