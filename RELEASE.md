@@ -110,10 +110,10 @@ GitHub Secret 只能存文本，需先把二进制 `.jks` 转 base64：
 5. `git tag v0.1.0`
 6. `git push origin main && git push origin v0.1.0`
 7. 观察 [GitHub Actions](https://github.com/hanklzl/OpenFlow/actions) 完成；验证：
-   - Release 已创建并含 3 个 asset：`OpenFlow-v0.1.0-arm64-v8a.apk`、`OpenFlow-v0.1.0-x86_64.apk`、`mapping-v0.1.0.zip`
+   - Release 已创建并含 4 个 asset：`OpenFlow-v0.1.0-arm64-v8a.apk`、`OpenFlow-v0.1.0-x86_64.apk`、`OpenFlow-v0.1.0-gpu-arm64-v8a.apk`（实验性 GPU 包，仅 arm64）、`mapping-v0.1.0.zip`
    - notes 末尾「构建产物」矩阵列全
    - `main` 上有 `docs(changelog): release v0.1.0 [skip ci]` 自动 commit
-   - `gh-pages/release/version.json` schemaVersion=2、`variants` 双 key、`mapping.url` 指向 release asset
+   - `gh-pages/release/version.json` schemaVersion=2、`variants` 三 key（`arm64-v8a` / `x86_64` / `gpu-arm64-v8a`）、`mapping.url` 指向 release asset
    - jsdelivr 镜像可拉：
      ```bash
      curl -I https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@gh-pages/release/version.json

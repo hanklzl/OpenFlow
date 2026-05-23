@@ -59,6 +59,7 @@ OpenFlow 是一个**类 Typeless Flow 的 Android 语音输入助手**：在任�
 ```bash
 ./gradlew :app:assembleDebug                  # 构建 Debug APK（含 NDK 原生编译，首次约 5-15 分钟）
 ./gradlew :app:assembleRelease                # 构建 Release APK（需签名环境变量）
+./gradlew :app:assembleRelease -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true   # GPU 实验包（仅 arm64-v8a；多花 ~5-10 分钟编 Vulkan shader）
 ./gradlew :app:testDebugUnitTest              # 单元测试
 ./gradlew :app:connectedDebugAndroidTest      # 仪器测试（需设备/模拟器）
 ./gradlew :app:lintDebug                      # 发布前 lint，日常 Debug 不需要
@@ -88,7 +89,7 @@ Release 构建只在签名环境变量齐备或任务明确涉及发布/签名�
 - Compose BOM：`2026.05.00`
 - NDK：`29.0.14206865`（r29，最新稳定版；r28+ 默认 16KB 段对齐，无需 CMake 额外 flag）
 - CMake：`3.22.1`
-- ABI Filters：`arm64-v8a` + `x86_64`
+- ABI Filters：`arm64-v8a` + `x86_64`（经 `splits.abi` 控制；GPU 实验包仅 `arm64-v8a`）
 
 ## 模块架构
 

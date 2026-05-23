@@ -32,6 +32,8 @@ val releaseSigningRequested = gradle.startParameter.taskNames.any { taskName ->
 
 val openflowEnableVulkan = project.findProperty("OpenflowEnableVulkan") == "true"
 val openflowEnableOpenCl = project.findProperty("OpenflowEnableOpenCl") == "true"
+// 任一 GPU 后端开启即视为「GPU 发布构建」：此时 ABI 收窄到 arm64-v8a（见下方 splits）。
+val openflowGpuRelease = openflowEnableVulkan || openflowEnableOpenCl
 
 fun requiredReleaseSigningEnv(name: String): String =
     providers.environmentVariable(name).orNull
@@ -114,7 +116,13 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86_64")
+            if (openflowGpuRelease) {
+                // GPU 发布包仅 arm64-v8a：Vulkan/OpenCL 后端只在真机 ARM 设备有意义，
+                // x86_64 仅供模拟器；避免为废弃的 x86_64 GPU 包白烧 ~5-10 分钟 Vulkan shader 编译。
+                include("arm64-v8a")
+            } else {
+                include("arm64-v8a", "x86_64")
+            }
             isUniversalApk = false
         }
     }

@@ -62,16 +62,26 @@ set(GGML_BACKEND_DL                OFF CACHE BOOL "" FORCE)
 
 漏一个会让 APK 体积膨胀几十 MB（curl 静态链）或编译失败（OpenMP 在 NDK 缺乏 runtime）。
 
-### MUST: 只打 arm64-v8a + x86_64
+### MUST: 只打 arm64-v8a + x86_64（默认/CPU 构建）
 
-`app/build.gradle.kts`：
+ABI 由 `app/build.gradle.kts` 的 `splits.abi` 控制（**不是** `ndk.abiFilters`）：
 
 ```kotlin
-ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+splits {
+    abi {
+        isEnable = true
+        reset()
+        if (openflowGpuRelease) include("arm64-v8a")        // GPU 包仅 arm64
+        else include("arm64-v8a", "x86_64")                 // 默认/CPU 两 ABI
+        isUniversalApk = false
+    }
+}
 ```
 
 `arm64-v8a` 覆盖主流真机，`x86_64` 用于本地 Android emulator 验证。
 仍禁止加 `armeabi-v7a` / `x86`，避免继续放大 NDK 编译时间与 APK 体积。
+
+**GPU 发布构建例外**：带 `-POpenflowEnableVulkan=true` / `-POpenflowEnableOpenCl=true` 时（`openflowGpuRelease == true`），`splits.abi` 收窄到 **arm64-v8a 单 ABI**。这是**有意为之**、不违反上面的 arm64+x86_64 基线——基线管的是默认/CPU 构建；Vulkan/OpenCL 后端只在真机 ARM 有意义，给 x86_64 编 GPU 包纯属浪费（181 个 Vulkan shader 编译耗时）。GPU 的 `-DOPENFLOW_ENABLE_VULKAN=ON` / `-DOPENFLOW_ENABLE_OPENCL=ON` 仍走现有 `externalNativeBuild.cmake.arguments`，不新增 cmake 调用（见下方「禁用 cmake.path 之外的 cmake 调用」）。
 
 ### MUST: 不要改 C++ 标准
 

@@ -27,6 +27,9 @@ jobs:
       apk-x86-64-name: ${{ steps.name-apk.outputs.apk_x86_64_name }}
       apk-x86-64-sha256: ${{ steps.apk-meta.outputs.sha256_x86_64 }}
       apk-x86-64-size: ${{ steps.apk-meta.outputs.size_x86_64 }}
+      apk-gpu-arm64-name: ${{ steps.name-gpu-apk.outputs.apk_gpu_arm64_v8a_name }}
+      apk-gpu-arm64-sha256: ${{ steps.name-gpu-apk.outputs.sha256_gpu_arm64_v8a }}
+      apk-gpu-arm64-size: ${{ steps.name-gpu-apk.outputs.size_gpu_arm64_v8a }}
       mapping-name: ${{ steps.pack-mapping.outputs.mapping_name }}
       mapping-sha256: ${{ steps.pack-mapping.outputs.mapping_sha256 }}
 
@@ -169,6 +172,45 @@ jobs:
             echo "mapping_sha256=$sha"
           } >> "$GITHUB_OUTPUT"
 
+      # GPU 实验包：第二次 assembleRelease 带 Vulkan + OpenCL 后端。
+      # 这一步会覆盖 apk/release/ 与 mapping/release/，因此必须排在上面
+      # Name APKs / Pack mapping（已把 CPU 产物拷到 $RUNNER_TEMP）之后。
+      # build.gradle.kts 在带 GPU 开关时把 splits.abi 收窄到 arm64-v8a，故只产一个 APK。
+      - name: Build GPU Release APK (arm64-v8a, Vulkan + OpenCL)
+        env:
+          ANDROID_RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+          LOGAN_AES_KEY: ${{ secrets.LOGAN_AES_KEY }}
+          LOGAN_AES_IV: ${{ secrets.LOGAN_AES_IV }}
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon \
+            -POpenflowEnableVulkan=true \
+            -POpenflowEnableOpenCl=true
+
+      - name: Name GPU APK
+        id: name-gpu-apk
+        run: |
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag_or_label="$GITHUB_REF_NAME"
+          else
+            tag_or_label="manual-${GITHUB_RUN_NUMBER}"
+          fi
+          gpu_src="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
+          if [ ! -f "$gpu_src" ]; then
+            echo "::error::expected GPU arm64-v8a APK not produced; saw:"
+            ls -la app/build/outputs/apk/release/
+            exit 1
+          fi
+          gpu_name="OpenFlow-${tag_or_label}-gpu-arm64-v8a.apk"
+          cp "$gpu_src" "$RUNNER_TEMP/$gpu_name"
+          {
+            echo "apk_gpu_arm64_v8a_name=$gpu_name"
+            echo "sha256_gpu_arm64_v8a=$(sha256sum "$RUNNER_TEMP/$gpu_name" | awk '{print $1}')"
+            echo "size_gpu_arm64_v8a=$(wc -c < "$RUNNER_TEMP/$gpu_name")"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Upload Release APK artifact (arm64-v8a)
         uses: actions/upload-artifact@v7
         with:
@@ -182,6 +224,14 @@ jobs:
         with:
           name: OpenFlow-release-apk-x86_64
           path: ${{ runner.temp }}/${{ steps.name-apk.outputs.apk_x86_64_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Release APK artifact (gpu-arm64-v8a)
+        uses: actions/upload-artifact@v7
+        with:
+          name: OpenFlow-release-apk-gpu-arm64-v8a
+          path: ${{ runner.temp }}/${{ steps.name-gpu-apk.outputs.apk_gpu_arm64_v8a_name }}
           if-no-files-found: error
           retention-days: 14
 
@@ -221,6 +271,12 @@ jobs:
           name: OpenFlow-release-apk-x86_64
           path: release-apk-x86_64
 
+      - name: Download Release APK artifact (gpu-arm64-v8a)
+        uses: actions/download-artifact@v7
+        with:
+          name: OpenFlow-release-apk-gpu-arm64-v8a
+          path: release-apk-gpu-arm64
+
       - name: Download mapping artifact
         uses: actions/download-artifact@v7
         with:
@@ -241,11 +297,14 @@ jobs:
           # 追加构建产物矩阵
           arm_apk="${{ needs.build-release-apk.outputs.apk-arm64-name }}"
           x64_apk="${{ needs.build-release-apk.outputs.apk-x86-64-name }}"
+          gpu_apk="${{ needs.build-release-apk.outputs.apk-gpu-arm64-name }}"
           map_zip="${{ needs.build-release-apk.outputs.mapping-name }}"
           arm_size_human=$(numfmt --to=iec --suffix=B "${{ needs.build-release-apk.outputs.apk-arm64-size }}")
           x64_size_human=$(numfmt --to=iec --suffix=B "${{ needs.build-release-apk.outputs.apk-x86-64-size }}")
+          gpu_size_human=$(numfmt --to=iec --suffix=B "${{ needs.build-release-apk.outputs.apk-gpu-arm64-size }}")
           arm_sha_short=$(echo "${{ needs.build-release-apk.outputs.apk-arm64-sha256 }}" | cut -c1-12)
           x64_sha_short=$(echo "${{ needs.build-release-apk.outputs.apk-x86-64-sha256 }}" | cut -c1-12)
+          gpu_sha_short=$(echo "${{ needs.build-release-apk.outputs.apk-gpu-arm64-sha256 }}" | cut -c1-12)
           map_sha_short=$(echo "${{ needs.build-release-apk.outputs.mapping-sha256 }}" | cut -c1-12)
           {
             echo ""
@@ -253,6 +312,7 @@ jobs:
             echo ""
             echo "- arm64-v8a: \`${arm_apk}\` · ${arm_size_human} · sha256 \`${arm_sha_short}\`"
             echo "- x86_64: \`${x64_apk}\` · ${x64_size_human} · sha256 \`${x64_sha_short}\`"
+            echo "- gpu (arm64-v8a, Vulkan+OpenCL): \`${gpu_apk}\` · ${gpu_size_human} · sha256 \`${gpu_sha_short}\` (实验性 GPU 包，运行时自动回退 CPU)"
             echo "- mapping: \`${map_zip}\` · sha256 \`${map_sha_short}\` (R8 反混淆用)"
           } >> release_notes.md
           head -60 release_notes.md
@@ -288,12 +348,13 @@ jobs:
         run: |
           arm_path="release-apk-arm64/${{ needs.build-release-apk.outputs.apk-arm64-name }}"
           x64_path="release-apk-x86_64/${{ needs.build-release-apk.outputs.apk-x86-64-name }}"
+          gpu_path="release-apk-gpu-arm64/${{ needs.build-release-apk.outputs.apk-gpu-arm64-name }}"
           map_path="release-mapping/${{ needs.build-release-apk.outputs.mapping-name }}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$map_path" --clobber
+            gh release upload "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$gpu_path" "$map_path" --clobber
             gh release edit "$GITHUB_REF_NAME" --notes-file release_notes.md
           else
-            gh release create "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$map_path" \
+            gh release create "$GITHUB_REF_NAME" "$arm_path" "$x64_path" "$gpu_path" "$map_path" \
               --title "$GITHUB_REF_NAME" \
               --notes-file release_notes.md
           fi
@@ -354,6 +415,7 @@ jobs:
               --tag "$GITHUB_REF_NAME" \
               --variant "arm64-v8a=${{ needs.build-release-apk.outputs.apk-arm64-name }},${{ needs.build-release-apk.outputs.apk-arm64-sha256 }},${{ needs.build-release-apk.outputs.apk-arm64-size }}" \
               --variant "x86_64=${{ needs.build-release-apk.outputs.apk-x86-64-name }},${{ needs.build-release-apk.outputs.apk-x86-64-sha256 }},${{ needs.build-release-apk.outputs.apk-x86-64-size }}" \
+              --variant "gpu-arm64-v8a=${{ needs.build-release-apk.outputs.apk-gpu-arm64-name }},${{ needs.build-release-apk.outputs.apk-gpu-arm64-sha256 }},${{ needs.build-release-apk.outputs.apk-gpu-arm64-size }}" \
               --mapping-name "${{ needs.build-release-apk.outputs.mapping-name }}" \
               --mapping-sha256 "${{ needs.build-release-apk.outputs.mapping-sha256 }}" \
               --notes source/release_notes.md \

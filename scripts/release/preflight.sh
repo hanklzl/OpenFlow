@@ -68,6 +68,29 @@ else
     echo "  WARN: mapping.txt not present; skipping mapping pack" >&2
 fi
 
+echo "[dry] Build GPU Release APK (arm64-v8a, Vulkan + OpenCl)"
+# GPU 实验包：第二次 assembleRelease 带 GPU 后端，build.gradle.kts 在带开关时把 splits 收窄到 arm64-v8a。
+# 它会覆盖 apk/release/ 与 mapping/release/——CPU 的 sha/size 上面已存进变量、mapping 已打到 /tmp，
+# 这里再把 CPU arm64 APK 留一份副本供末尾 smoke 建议引用。
+sha_gpu=""; size_gpu=""
+if [ -n "$arm_apk" ] && [ -n "${ANDROID_RELEASE_KEYSTORE_PATH:-}" ] && [ -f "${ANDROID_RELEASE_KEYSTORE_PATH}" ]; then
+    cp "$arm_apk" /tmp/of-cpu-arm64.apk 2>/dev/null || true
+    ./gradlew :app:assembleRelease --no-daemon \
+        -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true
+    gpu_apk="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
+    if [ -f "$gpu_apk" ]; then
+        sha_gpu=$(sha256sum "$gpu_apk" | awk '{print $1}')
+        size_gpu=$(wc -c < "$gpu_apk")
+        echo "  gpu-arm64-v8a: sha256=$sha_gpu size=$size_gpu"
+        arm_apk=/tmp/of-cpu-arm64.apk   # CPU arm64 已被覆盖，smoke 建议指向保留副本
+    else
+        echo "::error::GPU arm64-v8a Release APK not produced" >&2
+        exit 1
+    fi
+else
+    echo "  WARN: 无签名 env 或无 CPU 构建，跳过 GPU Release 构建（CI 必跑）" >&2
+fi
+
 echo "[dry] Generate release notes"
 # 优先用祖先链上的最近 tag；若当前 tag 不在祖先链上（如上次 release 的 hotfix 留在 release 分支没回流），fallback 到字面最近的 vX.Y.Z；都没有再回根 commit
 prev=$(git describe --tags --abbrev=0 2>/dev/null) || true
@@ -92,6 +115,7 @@ if [ -n "$sha_arm" ] && [ -n "$sha_x64" ]; then
         --tag "$tag" \
         --variant "arm64-v8a=OpenFlow-${tag}-arm64-v8a.apk,${sha_arm},${size_arm}" \
         --variant "x86_64=OpenFlow-${tag}-x86_64.apk,${sha_x64},${size_x64}" \
+        ${sha_gpu:+--variant "gpu-arm64-v8a=OpenFlow-${tag}-gpu-arm64-v8a.apk,${sha_gpu},${size_gpu}"} \
         ${mapping_name:+--mapping-name "$mapping_name"} \
         ${mapping_sha256:+--mapping-sha256 "$mapping_sha256"} \
         --notes "$notes" > "$out"

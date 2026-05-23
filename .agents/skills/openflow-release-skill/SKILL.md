@@ -91,7 +91,9 @@ source .env.release.local
 bash scripts/release/preflight.sh vX.Y.Z
 ```
 
-6 个 step 必须全绿（version 一致性 / signing env / clean build / split APK 数量 / mapping.txt 存在 / lint）。任一 step ≠ 0 → 修问题再重跑，**不要**带红推 tag。
+必须全绿（version 一致性 / signing env / clean build / split APK 数量 / mapping.txt 存在 / lint / **GPU 包构建**）。任一 step ≠ 0 → 修问题再重跑，**不要**带红推 tag。
+
+> **GPU 实验包**：preflight 与 CI 都会在 CPU 构建之后再跑一次 `./gradlew :app:assembleRelease -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true`。`build.gradle.kts` 在带任一 GPU 开关时把 `splits.abi` 收窄到 **arm64-v8a 单 ABI**，产出 `OpenFlow-vX.Y.Z-gpu-arm64-v8a.apk`（同 `applicationId`、同 `versionCode`，是 CPU 包的可选替代下载）。这一步要多花 ~5-10 分钟编译 181 个 Vulkan GLSL shader（NDK glslc）+ ~1-2 分钟 OpenCL ICD，故 preflight 本地会跑两次 release 构建、耗时约翻倍。GPU 后端运行时检测失败会自动回退 CPU，**因此 GPU 包不做真机门禁**——GPU init 在测试机失败不阻塞发布（区别于 CPU 链路崩溃）。mapping 仍只发 CPU 版（JVM 栈反混淆已够用）。
 
 操作者本地 `.env.release.local` 缺失？参见 [`references/preflight-checklist.md`](references/preflight-checklist.md) 的「一次性配置」段。
 
@@ -161,12 +163,12 @@ gh run watch --exit-status
 
 CI 全绿后逐条勾：
 
-- [ ] `gh release view vX.Y.Z` 列出 3 个 asset：`OpenFlow-arm64-v8a-release.apk`、`OpenFlow-x86_64-release.apk`、`mapping-vX.Y.Z.zip`。APK 大小合理（> 10 MB 但 < 200 MB）。
+- [ ] `gh release view vX.Y.Z` 列出 4 个 asset：`OpenFlow-vX.Y.Z-arm64-v8a.apk`、`OpenFlow-vX.Y.Z-x86_64.apk`、`OpenFlow-vX.Y.Z-gpu-arm64-v8a.apk`（实验性 GPU 包，仅 arm64）、`mapping-vX.Y.Z.zip`。CPU APK 大小合理（> 10 MB 但 < 200 MB）；GPU 包因含 Vulkan/OpenCL 后端会明显更大。
 - [ ] gh-pages 版本清单 OK：
   ```bash
   gh api repos/hanklzl/OpenFlow/contents/release/version.json?ref=gh-pages --jq .content | base64 -d | jq .
   ```
-  字段验证：`schemaVersion == 2`、`variants["arm64-v8a"].sha256` 非空、`variants["x86_64"].sha256` 非空、`tag == "vX.Y.Z"`。
+  字段验证：`schemaVersion == 2`、`variants["arm64-v8a"].sha256` 非空、`variants["x86_64"].sha256` 非空、`variants["gpu-arm64-v8a"].sha256` 非空、`tag == "vX.Y.Z"`。
 - [ ] main 上自动 commit `docs(changelog): release vX.Y.Z [skip ci]` 存在：
   ```bash
   git -C /Users/zili/code/android/OpenFlow log --oneline -3
