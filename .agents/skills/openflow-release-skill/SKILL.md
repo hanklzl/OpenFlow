@@ -91,9 +91,17 @@ source .env.release.local
 bash scripts/release/preflight.sh vX.Y.Z
 ```
 
-必须全绿（version 一致性 / signing env / clean build / split APK 数量 / mapping.txt 存在 / lint / **GPU 包构建**）。任一 step ≠ 0 → 修问题再重跑，**不要**带红推 tag。
+必须全绿（version 一致性 / signing env / clean build / 三个 flavor APK 齐全 / mapping.txt 存在 / lint / **GPU 包产出**）。任一 step ≠ 0 → 修问题再重跑，**不要**带红推 tag。
 
-> **GPU 实验包**：preflight 与 CI 都会在 CPU 构建之后再跑一次 `./gradlew :app:assembleRelease -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true`。`build.gradle.kts` 在带任一 GPU 开关时把 `splits.abi` 收窄到 **arm64-v8a 单 ABI**，产出 `OpenFlow-vX.Y.Z-gpu-arm64-v8a.apk`（同 `applicationId`、同 `versionCode`，是 CPU 包的可选替代下载）。这一步要多花 ~5-10 分钟编译 181 个 Vulkan GLSL shader（NDK glslc）+ ~1-2 分钟 OpenCL ICD，故 preflight 本地会跑两次 release 构建、耗时约翻倍。GPU 后端运行时检测失败会自动回退 CPU，**因此 GPU 包不做真机门禁**——GPU init 在测试机失败不阻塞发布（区别于 CPU 链路崩溃）。mapping 仍只发 CPU 版（JVM 栈反混淆已够用）。
+> **GPU 实验包**：现在一条 `./gradlew :app:assembleRelease` 借 productFlavor 同时出
+> CPU(`cpuArm64`/`cpuX64`) 与 GPU(`gpuArm64`) 三个包——**不再**跑第二次 gradle、**不再**用
+> `-POpenflowEnableVulkan/-POpenflowEnableOpenCl`。三者产物路径独立（`apk/cpuArm64/`、
+> `apk/cpuX64/`、`apk/gpuArm64/`），互不覆盖；preflight/CI 只构建一次。`gpuArm64Release`
+> 产出 `OpenFlow-vX.Y.Z-gpu-arm64-v8a.apk`（同 `applicationId`、同 `versionCode`，CPU 包的可选替代下载）。
+> GPU 多出的 181 个 Vulkan shader + OpenCL ICD 在同一次构建里编（gpu flavor），ccache 让
+> 与 CPU 共享的 whisper/llama/ggml-cpu 对象命中缓存、只补 GPU 增量，故不再「耗时翻倍」。
+> GPU 后端运行时检测失败会自动回退 CPU，**GPU 包不做真机门禁**。mapping 仍只发 CPU 版
+> （取 `mapping/cpuArm64Release/mapping.txt`；两 flavor 的 JVM 字节码一致，反混淆通用）。
 
 操作者本地 `.env.release.local` 缺失？参见 [`references/preflight-checklist.md`](references/preflight-checklist.md) 的「一次性配置」段。
 

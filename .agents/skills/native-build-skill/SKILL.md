@@ -62,26 +62,53 @@ set(GGML_BACKEND_DL                OFF CACHE BOOL "" FORCE)
 
 漏一个会让 APK 体积膨胀几十 MB（curl 静态链）或编译失败（OpenMP 在 NDK 缺乏 runtime）。
 
-### MUST: 只打 arm64-v8a + x86_64（默认/CPU 构建）
+### MUST: ABI 与 GPU 出包走 productFlavor 双维度（不是 splits.abi）
 
-ABI 由 `app/build.gradle.kts` 的 `splits.abi` 控制（**不是** `ndk.abiFilters`）：
+ABI 由 `app/build.gradle.kts` 的 **flavor 维度** 控制，**不要**用 `splits.abi`——
+AGP 不允许 `splits.abi` 与 `ndk.abiFilters` 同时设置，而 gpu 需要按 ABI 收窄（只出
+arm64），故 ABI 必须做成 flavor 维度。两个维度 `backend`(cpu/gpu) × `abi`(arm64/x64)，
+每变体设单个 `ndk.abiFilters` → 产物即「每 ABI 一个 APK」：
 
 ```kotlin
-splits {
-    abi {
-        isEnable = true
-        reset()
-        if (openflowGpuRelease) include("arm64-v8a")        // GPU 包仅 arm64
-        else include("arm64-v8a", "x86_64")                 // 默认/CPU 两 ABI
-        isUniversalApk = false
+flavorDimensions += listOf("backend", "abi")
+productFlavors {
+    create("cpu") { dimension = "backend"; /* buildConfigField VULKAN/OPENCL = false */ }
+    create("gpu") {
+        dimension = "backend"
+        externalNativeBuild { cmake { arguments += listOf("-DOPENFLOW_ENABLE_VULKAN=ON", "-DOPENFLOW_ENABLE_OPENCL=ON") } }
+        /* buildConfigField VULKAN/OPENCL = true */
     }
+    create("arm64") { dimension = "abi"; ndk { abiFilters += "arm64-v8a" } }
+    create("x64")   { dimension = "abi"; ndk { abiFilters += "x86_64" } }
 }
 ```
 
 `arm64-v8a` 覆盖主流真机，`x86_64` 用于本地 Android emulator 验证。
 仍禁止加 `armeabi-v7a` / `x86`，避免继续放大 NDK 编译时间与 APK 体积。
 
-**GPU 发布构建例外**：带 `-POpenflowEnableVulkan=true` / `-POpenflowEnableOpenCl=true` 时（`openflowGpuRelease == true`），`splits.abi` 收窄到 **arm64-v8a 单 ABI**。这是**有意为之**、不违反上面的 arm64+x86_64 基线——基线管的是默认/CPU 构建；Vulkan/OpenCL 后端只在真机 ARM 有意义，给 x86_64 编 GPU 包纯属浪费（181 个 Vulkan shader 编译耗时）。GPU 的 `-DOPENFLOW_ENABLE_VULKAN=ON` / `-DOPENFLOW_ENABLE_OPENCL=ON` 仍走现有 `externalNativeBuild.cmake.arguments`，不新增 cmake 调用（见下方「禁用 cmake.path 之外的 cmake 调用」）。
+**变体裁剪**（`androidComponents.beforeVariants`，见 build.gradle.kts）：
+- `gpu+x64` 始终禁用——Vulkan/OpenCL 只在真机 ARM 有意义，给 x86_64 编 GPU 纯属浪费（181 个 shader）。
+- `gpu` 的 **debug** 默认禁用，避免日常 `assembleDebug` 顺带编 Vulkan shader；要本地验 GPU 用 `-PopenflowGpuDebug=true assembleGpuArm64Debug`。
+- 启用集合：release = cpuArm64 / cpuX64 / gpuArm64；debug = cpuArm64 / cpuX64。
+
+一条 `./gradlew :app:assembleRelease` 同时出三个包，产物路径按 flavor 隔离
+（`apk/cpuArm64/`、`apk/cpuX64/`、`apk/gpuArm64/`），互不覆盖。**不再**用
+`-POpenflowEnableVulkan/-POpenflowEnableOpenCl`，也**不再**跑两次 gradle。
+GPU 的 `-DOPENFLOW_ENABLE_*=ON` 仍走 `externalNativeBuild.cmake.arguments`（现由 gpu flavor 提供），不新增 cmake 调用。
+
+### MUST: native 编译加速用 ccache（不要预编译 .so 入库）
+
+CMakeLists 顶部在 `add_subdirectory` 之前显式设 `CMAKE_C/CXX_COMPILER_LAUNCHER=ccache`
+（`find_program(CCACHE_PROGRAM ccache)` 命中才设），覆盖 whisper/llama/ggml/openflow_jni
+全部 target；ggml 自带的 `GGML_CCACHE` guard 见 launcher 已设会自动跳过、不重复。
+未装 ccache 时为 no-op，行为同旧。
+
+跨 worktree / clean 命中**必须**设全局 `base_dir=$HOME` + `hash_dir=false`（否则每个
+worktree 不同绝对路径 → 全 miss）。实测：清掉 `.cxx` 重编 211 文件，命中 ~88%、墙钟
+2m12s → 25s。
+
+**不要**改成「预编译 `.so` 入 jniLibs」当前阶段——本仓频繁改 `jni_*.cpp` / submodule，
+预编译会频繁过期。该路线留作 native 稳定后的后续阶段（届时 Git LFS + 指纹防过期）。
 
 ### MUST: 不要改 C++ 标准
 
@@ -130,7 +157,7 @@ object WhisperJni { external fun nativeInit(modelPath: String): Long }
 
 ### MUST NOT: 启用 cmake.path 之外的 cmake 调用
 
-`app/build.gradle.kts` 用 `externalNativeBuild.cmake.path`。**禁止**改成 `ndkBuild` 或自定义 task——AGP 8.7 对 cmake 集成最稳定。
+`app/build.gradle.kts` 用 `externalNativeBuild.cmake.path`。**禁止**改成 `ndkBuild` 或自定义 task——AGP 对 cmake 集成最稳定。（ccache 是通过 `CMAKE_CXX_COMPILER_LAUNCHER` 接进 cmake 的，不算「cmake.path 之外的调用」。）
 
 ### MUST: 静态链接所有 native deps
 
@@ -139,22 +166,29 @@ object WhisperJni { external fun nativeInit(modelPath: String): Long }
 
 ## 调试技巧
 
-- CMake 配置失败：看 `app/.cxx/Debug/<hash>/<abi>/CMakeFiles/CMakeOutput.log` 和 `CMakeError.log`
-- `UnsatisfiedLinkError`：先 `unzip -l app/build/outputs/apk/debug/app-debug.apk | grep openflow_jni` 确认 `.so` 在；再 `objdump -T libopenflow_jni.so | grep Java_` 看符号是否导出
-- 编译慢：第一次包含 NDK 配置 + 所有 .cpp 编译（约 200 个 .o 文件），骁龙 Mac 5-7 分钟正常；后续 `assembleDebug` 走增量约 30s
+- CMake 配置失败：看 `app/.cxx/Debug/<hash>/<abi>/CMakeFiles/CMakeOutput.log` 和 `CMakeError.log`（cpu/gpu 各有独立 hash 目录）
+- `UnsatisfiedLinkError`：先 `unzip -l app/build/outputs/apk/cpuArm64/debug/OpenFlow-cpu-arm64-debug.apk | grep openflow_jni` 确认 `.so` 在；再 `llvm-objdump -T <so> | grep Java_` 看符号是否导出（应有 12 个 `Java_com_hank_*`）
+- 编译慢：第一次约 200 个 .o，骁龙 Mac 冷构建 ~2-3 分钟；**装了 ccache 后** clean / 新 worktree 重编命中 ~88%、降到 ~25s。命中率低先查 `ccache -s` 与 `base_dir`/`hash_dir` 配置
+- gpu .so（35M，含 Vulkan/OpenCL + 181 SPIR-V shader）比 cpu .so（3.6M stripped）大一截属正常
 
 ## 验证命令
 
 ```bash
-# 完整原生构建
-./gradlew :app:externalNativeBuildDebug --console=plain
+# 单变体原生构建（cpu arm64）
+./gradlew :app:assembleCpuArm64Debug --console=plain
+
+# 一条命令出全部 Release 包（需签名 env）
+./gradlew :app:assembleRelease --no-daemon
 
 # 看哪些 native lib 进了 APK
-unzip -l app/build/outputs/apk/debug/app-debug.apk | grep '\.so'
+unzip -l app/build/outputs/apk/cpuArm64/debug/OpenFlow-cpu-arm64-debug.apk | grep '\.so'
 
-# 看 JNI 符号
-file app/build/intermediates/cxx/Debug/*/obj/arm64-v8a/libopenflow_jni.so
-file app/build/intermediates/cxx/Debug/*/obj/x86_64/libopenflow_jni.so
+# 看 JNI 符号（NDK 自带 llvm-objdump）
+SO=$(find app/build/intermediates/cxx -name 'libopenflow_jni.so' | head -1)
+"$(find ~/Library/Android/sdk/ndk/29.0.14206865 -name llvm-objdump | head -1)" -T "$SO" | grep -c Java_com_hank
+
+# ccache 命中率
+ccache -s
 ```
 
 ## 参考

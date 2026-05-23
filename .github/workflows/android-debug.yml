@@ -41,6 +41,21 @@ jobs:
             "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+          ccache --version | head -1
+
+      - name: Cache ccache objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-debug-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/CMakeLists.txt', '.gitmodules') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-debug-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/CMakeLists.txt', '.gitmodules') }}-
+            ccache-debug-${{ runner.os }}-
+
       - name: Setup Gradle (with cache)
         uses: gradle/actions/setup-gradle@v3
         with:
@@ -49,14 +64,24 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      # assembleDebug 只编 cpu flavor 两 ABI（cpuArm64Debug + cpuX64Debug）；
+      # gpuDebug 在 build.gradle.kts 里默认禁用，故此处不会触发 Vulkan shader 编译。
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        env:
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_NOHASHDIR: "true"
+          CCACHE_SLOPPINESS: "time_macros,include_file_ctime,include_file_mtime,locale,pch_defines"
+          CCACHE_MAXSIZE: "2G"
+        run: |
+          ccache --zero-stats
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          ccache --show-stats | grep -iE "hits|misses|cacheable" || true
 
       - name: Upload debug APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: openflow-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/*/debug/*.apk
           if-no-files-found: error
           retention-days: 14

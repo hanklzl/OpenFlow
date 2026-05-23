@@ -4,7 +4,7 @@
 # 退出码：0 成功 / 1 测试失败 / 2 setup 错（缺 APK / 设备 / 模型）。
 set -euo pipefail
 
-APK="${APK:-app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk}"
+APK="${APK:-app/build/outputs/apk/cpuArm64/release/OpenFlow-cpu-arm64-release.apk}"
 DEVICE=""
 MODELS_DIR="${MODELS_DIR:-$HOME/.openflow-smoke-models}"
 WHISPER="ggml-tiny-q5_1"                       # ModelCatalog.whisperTiny.id（最轻档 32 MB）

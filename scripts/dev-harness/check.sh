@@ -39,12 +39,13 @@ python3 scripts/dev-harness/grep-check.py
 
 if [[ "$SKIP_COMPILE_TESTS" -eq 0 ]]; then
   echo "==> Compile-only test sources (catches fixture drift)"
-  ./gradlew :app:compileDebugUnitTestKotlin --no-daemon
+  # productFlavor 后没有裸 Debug 变体；用 cpuArm64Debug 作代表（单测 JVM/ABI 无关）
+  ./gradlew :app:compileCpuArm64DebugUnitTestKotlin --no-daemon
 fi
 
 if [[ "$SKIP_TESTS" -eq 0 ]]; then
   echo "==> Unit tests"
-  ./gradlew :app:testDebugUnitTest --no-daemon
+  ./gradlew :app:testCpuArm64DebugUnitTest --no-daemon
 fi
 
 echo "==> OK"

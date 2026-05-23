@@ -7,6 +7,22 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
 
+# --- ccache: object-level compile cache ---
+# Set the compiler launcher BEFORE add_subdirectory(llama/whisper) so it covers
+# every target (ggml / llama / whisper / openflow_jni), not just ggml. Because we
+# set CMAKE_C/CXX_COMPILER_LAUNCHER here, ggml's own `if (... NOT
+# CMAKE_CXX_COMPILER_LAUNCHER)` guard skips its redundant RULE_LAUNCH_COMPILE
+# wiring (no double-ccache). Absent ccache this is a no-op — builds behave as before.
+# Cross-worktree hits require ccache base_dir + hash_dir=false (see AGENTS.md).
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER   "${CCACHE_PROGRAM}" CACHE STRING "" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE STRING "" FORCE)
+    message(STATUS "OpenFlow: ccache enabled at ${CCACHE_PROGRAM}")
+else()
+    message(STATUS "OpenFlow: ccache not found; native build will not be cached")
+endif()
+
 # --- Disable everything we don't need from the upstream submodules ---
 set(BUILD_SHARED_LIBS              OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE                    OFF CACHE BOOL "" FORCE)

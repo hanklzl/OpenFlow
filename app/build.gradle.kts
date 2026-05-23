@@ -30,11 +30,6 @@ val releaseSigningRequested = gradle.startParameter.taskNames.any { taskName ->
         normalizedTaskName.endsWith("Release", ignoreCase = true)
 }
 
-val openflowEnableVulkan = project.findProperty("OpenflowEnableVulkan") == "true"
-val openflowEnableOpenCl = project.findProperty("OpenflowEnableOpenCl") == "true"
-// 任一 GPU 后端开启即视为「GPU 发布构建」：此时 ABI 收窄到 arm64-v8a（见下方 splits）。
-val openflowGpuRelease = openflowEnableVulkan || openflowEnableOpenCl
-
 fun requiredReleaseSigningEnv(name: String): String =
     providers.environmentVariable(name).orNull
         ?: throw org.gradle.api.GradleException(
@@ -62,20 +57,10 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_ARM_NEON=ON",
                 )
-                // Phase 6 experimental Vulkan: enable with
-                //   ./gradlew assembleDebug -POpenflowEnableVulkan=true
-                // First clean build then takes 5-10 extra minutes per ABI to
-                // compile ggml's 181 GLSL shaders via the NDK-bundled glslc.
-                if (openflowEnableVulkan) {
-                    arguments += "-DOPENFLOW_ENABLE_VULKAN=ON"
-                }
-                if (openflowEnableOpenCl) {
-                    arguments += "-DOPENFLOW_ENABLE_OPENCL=ON"
-                }
+                // GPU 后端（Vulkan/OpenCL）的 cmake 开关与 buildConfigField 改由
+                // productFlavors 的 gpu flavor 提供（见下方 productFlavors 块）。
             }
         }
-        buildConfigField("boolean", "OPENFLOW_ENABLE_VULKAN", openflowEnableVulkan.toString())
-        buildConfigField("boolean", "OPENFLOW_ENABLE_OPENCL", openflowEnableOpenCl.toString())
     }
 
     signingConfigs {
@@ -112,18 +97,40 @@ android {
         }
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            if (openflowGpuRelease) {
-                // GPU 发布包仅 arm64-v8a：Vulkan/OpenCL 后端只在真机 ARM 设备有意义，
-                // x86_64 仅供模拟器；避免为废弃的 x86_64 GPU 包白烧 ~5-10 分钟 Vulkan shader 编译。
-                include("arm64-v8a")
-            } else {
-                include("arm64-v8a", "x86_64")
+    // 两个维度组合出每包：backend(cpu/gpu) × abi(arm64/x64)。
+    // 用「abi 维度 + 每 flavor 单 abiFilters」替代 splits.abi——因为 AGP 不允许
+    // splits.abi 与 ndk.abiFilters 同时设置，而 gpu 需要按 ABI 收窄（只出 arm64），
+    // 故 ABI 必须做成 flavor 维度。每个变体单 ABI，产物即「每 ABI 一个 APK」。
+    flavorDimensions += listOf("backend", "abi")
+    productFlavors {
+        // --- backend 维度 ---
+        // CPU 包：默认后端。
+        create("cpu") {
+            dimension = "backend"
+            buildConfigField("boolean", "OPENFLOW_ENABLE_VULKAN", "false")
+            buildConfigField("boolean", "OPENFLOW_ENABLE_OPENCL", "false")
+        }
+        // GPU 实验包：编入 Vulkan + OpenCL 后端，运行时自动回退 CPU。
+        // 仅 arm64（gpu+x64 变体由下方 androidComponents 过滤禁用）。
+        create("gpu") {
+            dimension = "backend"
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DOPENFLOW_ENABLE_VULKAN=ON", "-DOPENFLOW_ENABLE_OPENCL=ON")
+                }
             }
-            isUniversalApk = false
+            buildConfigField("boolean", "OPENFLOW_ENABLE_VULKAN", "true")
+            buildConfigField("boolean", "OPENFLOW_ENABLE_OPENCL", "true")
+        }
+        // --- abi 维度 ---（flavor 名须是合法标识符，故用 arm64 / x64，
+        // CI 改名时再映射到规范的 arm64-v8a / x86_64）
+        create("arm64") {
+            dimension = "abi"
+            ndk { abiFilters += "arm64-v8a" }
+        }
+        create("x64") {
+            dimension = "abi"
+            ndk { abiFilters += "x86_64" }
         }
     }
 
@@ -140,6 +147,24 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+// 变体裁剪（启用集合）：
+//  - release: cpu-arm64, cpu-x64, gpu-arm64        （gpu-x64 始终禁用：x86_64 不出 GPU 包）
+//  - debug:   cpu-arm64, cpu-x64                    （gpu-arm64 默认禁用，避免日常
+//             assembleDebug 顺带编 gpu 的 181 个 Vulkan shader；加 -PopenflowGpuDebug=true 开启）
+androidComponents {
+    beforeVariants { variant ->
+        val backend = variant.productFlavors.firstOrNull { it.first == "backend" }?.second
+        val abi = variant.productFlavors.firstOrNull { it.first == "abi" }?.second
+        val isGpu = backend == "gpu"
+        if (isGpu && abi == "x64") {
+            variant.enable = false
+        }
+        if (isGpu && variant.buildType == "debug" && !project.hasProperty("openflowGpuDebug")) {
+            variant.enable = false
         }
     }
 }

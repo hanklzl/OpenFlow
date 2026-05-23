@@ -32,7 +32,7 @@ JVM 单测必须快速、确定、无真实外部依赖：禁止真实网络、�
 
 定期 review 测试必要性，删除或重写重复、脆弱、低价值、高耗时测试，避免测试套件膨胀后反向阻碍迭代。
 
-功能收尾必须通过 `./gradlew :app:testDebugUnitTest`；优先运行 `bash scripts/dev-harness/check.sh` 覆盖 symlink、grep guard、test source compile 与 JVM unit test gate。
+功能收尾必须通过 `./gradlew :app:testCpuArm64DebugUnitTest`（productFlavor 后无裸 Debug 变体，用 cpuArm64 代表；单测 JVM/ABI 无关）；优先运行 `bash scripts/dev-harness/check.sh` 覆盖 symlink、grep guard、test source compile 与 JVM unit test gate。
 
 ## 不变约束
 
@@ -98,12 +98,12 @@ OpenFlow 暂未引入 Robolectric / Paparazzi。Compose 行为测试只在真机
 ## 命令
 
 ```bash
-./gradlew :app:testDebugUnitTest                # JVM 单测
-./gradlew :app:testDebugUnitTest --rerun-tasks  # 强制重跑（缓存怀疑）
-./gradlew :app:connectedDebugAndroidTest        # 真机/模拟器仪器测试
+./gradlew :app:testCpuArm64DebugUnitTest                # JVM 单测（旧 testDebugUnitTest 已随 flavor 失效）
+./gradlew :app:testCpuArm64DebugUnitTest --rerun-tasks  # 强制重跑（缓存怀疑）
+./gradlew :app:connectedCpuArm64DebugAndroidTest        # 真机/模拟器仪器测试
 
 # 单独跑一个 class
-./gradlew :app:testDebugUnitTest --tests "com.hank.flow.open.asr.WhisperEngineTest"
+./gradlew :app:testCpuArm64DebugUnitTest --tests "com.hank.flow.open.asr.WhisperEngineTest"
 ```
 
 ## 参考

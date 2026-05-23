@@ -33,9 +33,10 @@ else
     echo "  WARN: ANDROID_RELEASE_KEYSTORE_PATH not set; skipping real Release build" >&2
     echo "  (CI 必跑；本地若无签名 env 跳过)"
 fi
-arm_apk="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
-x64_apk="app/build/outputs/apk/release/OpenFlow-x86_64-release.apk"
-mapping_src="app/build/outputs/mapping/release/mapping.txt"
+arm_apk="app/build/outputs/apk/cpuArm64/release/OpenFlow-cpu-arm64-release.apk"
+x64_apk="app/build/outputs/apk/cpuX64/release/OpenFlow-cpu-x64-release.apk"
+gpu_apk="app/build/outputs/apk/gpuArm64/release/OpenFlow-gpu-arm64-release.apk"
+mapping_src="app/build/outputs/mapping/cpuArm64Release/mapping.txt"
 
 if [ ! -f "$arm_apk" ] || [ ! -f "$x64_apk" ]; then
     echo "  WARN: per-ABI Release APK not present; downstream steps using stub data" >&2
@@ -68,27 +69,20 @@ else
     echo "  WARN: mapping.txt not present; skipping mapping pack" >&2
 fi
 
-echo "[dry] Build GPU Release APK (arm64-v8a, Vulkan + OpenCl)"
-# GPU 实验包：第二次 assembleRelease 带 GPU 后端，build.gradle.kts 在带开关时把 splits 收窄到 arm64-v8a。
-# 它会覆盖 apk/release/ 与 mapping/release/——CPU 的 sha/size 上面已存进变量、mapping 已打到 /tmp，
-# 这里再把 CPU arm64 APK 留一份副本供末尾 smoke 建议引用。
+echo "[dry] Inspect GPU Release APK (arm64-v8a, Vulkan + OpenCL)"
+# GPU 包已随上面单条 assembleRelease 的 gpuArm64Release flavor 一并产出，路径独立于
+# CPU 包（apk/gpuArm64/ vs apk/cpuArm64/、apk/cpuX64/），互不覆盖——无需第二次构建，
+# 也不必再为被覆盖的 CPU arm64 留 /tmp 副本。
 sha_gpu=""; size_gpu=""
-if [ -n "$arm_apk" ] && [ -n "${ANDROID_RELEASE_KEYSTORE_PATH:-}" ] && [ -f "${ANDROID_RELEASE_KEYSTORE_PATH}" ]; then
-    cp "$arm_apk" /tmp/of-cpu-arm64.apk 2>/dev/null || true
-    ./gradlew :app:assembleRelease --no-daemon \
-        -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true
-    gpu_apk="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
-    if [ -f "$gpu_apk" ]; then
-        sha_gpu=$(sha256sum "$gpu_apk" | awk '{print $1}')
-        size_gpu=$(wc -c < "$gpu_apk")
-        echo "  gpu-arm64-v8a: sha256=$sha_gpu size=$size_gpu"
-        arm_apk=/tmp/of-cpu-arm64.apk   # CPU arm64 已被覆盖，smoke 建议指向保留副本
-    else
-        echo "::error::GPU arm64-v8a Release APK not produced" >&2
-        exit 1
-    fi
+if [ -f "$gpu_apk" ]; then
+    sha_gpu=$(sha256sum "$gpu_apk" | awk '{print $1}')
+    size_gpu=$(wc -c < "$gpu_apk")
+    echo "  gpu-arm64-v8a: sha256=$sha_gpu size=$size_gpu"
+elif [ -n "${ANDROID_RELEASE_KEYSTORE_PATH:-}" ] && [ -f "${ANDROID_RELEASE_KEYSTORE_PATH}" ]; then
+    echo "::error::GPU arm64-v8a Release APK not produced at $gpu_apk" >&2
+    exit 1
 else
-    echo "  WARN: 无签名 env 或无 CPU 构建，跳过 GPU Release 构建（CI 必跑）" >&2
+    echo "  WARN: 无签名 env，跳过 GPU Release 检查（CI 必跑）" >&2
 fi
 
 echo "[dry] Generate release notes"

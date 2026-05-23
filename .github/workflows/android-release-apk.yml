@@ -72,6 +72,24 @@ jobs:
             "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
+      - name: Install ccache
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ccache
+          ccache --version | head -1
+
+      # ccache 在对象粒度缓存 native 编译：CPU 两 ABI + GPU flavor 共享的
+      # whisper/llama/ggml-cpu .o 跨 run 命中，单条 assembleRelease 里 GPU flavor
+      # 也复用 CPU 已编对象，只补 Vulkan/OpenCL 增量。
+      - name: Cache ccache objects
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-release-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/CMakeLists.txt', '.gitmodules') }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-release-${{ runner.os }}-${{ hashFiles('app/src/main/cpp/CMakeLists.txt', '.gitmodules') }}-
+            ccache-release-${{ runner.os }}-
+
       - name: Validate release secrets
         env:
           ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
@@ -107,7 +125,10 @@ jobs:
       - name: Run release lint
         run: ./gradlew lint --no-daemon
 
-      - name: Build Release APK
+      # 单条 assembleRelease 一次出全部包：cpuArm64 + cpuX64 + gpuArm64（gpuX64 与
+      # 所有 gpuDebug 在 build.gradle.kts 的 androidComponents 里默认禁用）。不再需要
+      # 第二次带 -P 的 GPU 构建——三个 flavor 产物路径天然隔离、互不覆盖。
+      - name: Build Release APK (cpu + gpu, one command)
         env:
           ANDROID_RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
           ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
@@ -115,7 +136,14 @@ jobs:
           ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
           LOGAN_AES_KEY: ${{ secrets.LOGAN_AES_KEY }}
           LOGAN_AES_IV: ${{ secrets.LOGAN_AES_IV }}
-        run: ./gradlew :app:assembleRelease --no-daemon
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_NOHASHDIR: "true"
+          CCACHE_SLOPPINESS: "time_macros,include_file_ctime,include_file_mtime,locale,pch_defines"
+          CCACHE_MAXSIZE: "2G"
+        run: |
+          ccache --zero-stats
+          ./gradlew :app:assembleRelease --no-daemon
+          ccache --show-stats | grep -iE "hits|misses|cacheable" || true
 
       - name: Name APKs
         id: name-apk
@@ -125,11 +153,11 @@ jobs:
           else
             tag_or_label="manual-${GITHUB_RUN_NUMBER}"
           fi
-          arm_src="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
-          x64_src="app/build/outputs/apk/release/OpenFlow-x86_64-release.apk"
+          arm_src="app/build/outputs/apk/cpuArm64/release/OpenFlow-cpu-arm64-release.apk"
+          x64_src="app/build/outputs/apk/cpuX64/release/OpenFlow-cpu-x64-release.apk"
           if [ ! -f "$arm_src" ] || [ ! -f "$x64_src" ]; then
-            echo "::error::expected per-ABI APKs not produced; saw:"
-            ls -la app/build/outputs/apk/release/
+            echo "::error::expected per-ABI CPU APKs not produced; saw:"
+            ls -laR app/build/outputs/apk/
             exit 1
           fi
           arm_name="OpenFlow-${tag_or_label}-arm64-v8a.apk"
@@ -157,7 +185,9 @@ jobs:
         id: pack-mapping
         if: github.ref_type == 'tag'
         run: |
-          mapping_src="app/build/outputs/mapping/release/mapping.txt"
+          # 各 flavor 各有一份 mapping；Kotlin/Java 字节码两 flavor 一致，mapping 实质相同，
+          # 沿用单 mapping 策略取 cpuArm64Release 这份。
+          mapping_src="app/build/outputs/mapping/cpuArm64Release/mapping.txt"
           if [ ! -f "$mapping_src" ]; then
             echo "::error::expected mapping.txt not produced at $mapping_src"
             exit 1
@@ -172,23 +202,9 @@ jobs:
             echo "mapping_sha256=$sha"
           } >> "$GITHUB_OUTPUT"
 
-      # GPU 实验包：第二次 assembleRelease 带 Vulkan + OpenCL 后端。
-      # 这一步会覆盖 apk/release/ 与 mapping/release/，因此必须排在上面
-      # Name APKs / Pack mapping（已把 CPU 产物拷到 $RUNNER_TEMP）之后。
-      # build.gradle.kts 在带 GPU 开关时把 splits.abi 收窄到 arm64-v8a，故只产一个 APK。
-      - name: Build GPU Release APK (arm64-v8a, Vulkan + OpenCL)
-        env:
-          ANDROID_RELEASE_KEYSTORE_PATH: ${{ runner.temp }}/release.jks
-          ANDROID_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_STORE_PASSWORD }}
-          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
-          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
-          LOGAN_AES_KEY: ${{ secrets.LOGAN_AES_KEY }}
-          LOGAN_AES_IV: ${{ secrets.LOGAN_AES_IV }}
-        run: |
-          ./gradlew :app:assembleRelease --no-daemon \
-            -POpenflowEnableVulkan=true \
-            -POpenflowEnableOpenCl=true
-
+      # GPU 包已在上面那条 assembleRelease 里随 gpuArm64Release flavor 一并产出，
+      # 路径独立于 CPU 包（apk/gpuArm64/ vs apk/cpuArm64/、apk/cpuX64/），互不覆盖，
+      # 无需第二次构建。
       - name: Name GPU APK
         id: name-gpu-apk
         run: |
@@ -197,10 +213,10 @@ jobs:
           else
             tag_or_label="manual-${GITHUB_RUN_NUMBER}"
           fi
-          gpu_src="app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk"
+          gpu_src="app/build/outputs/apk/gpuArm64/release/OpenFlow-gpu-arm64-release.apk"
           if [ ! -f "$gpu_src" ]; then
             echo "::error::expected GPU arm64-v8a APK not produced; saw:"
-            ls -la app/build/outputs/apk/release/
+            ls -laR app/build/outputs/apk/
             exit 1
           fi
           gpu_name="OpenFlow-${tag_or_label}-gpu-arm64-v8a.apk"

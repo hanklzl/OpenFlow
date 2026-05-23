@@ -8,7 +8,7 @@ OpenFlow 单测 / 仪器测试的强约束。
 2. **功能单测必须覆盖正常路径与异常 / 降级路径**：涉及设置、模型、ASR、polish、插入、权限、下载、Service 协作等行为时，至少覆盖主要成功路径和可预期失败 / 未就绪 / fallback 路径。
 3. **JVM 单测必须快速、确定、无真实外部依赖**：禁止真实网络、真实 JNI `.so`、真实 `AudioRecord`、无限等待；使用 fake / mock / test dispatcher 保持可重复。
 4. **定期 review 测试必要性**：删除或重写重复、脆弱、低价值、高耗时测试，避免测试套件膨胀后反向阻碍迭代。
-5. **功能收尾必须通过 `./gradlew :app:testDebugUnitTest`**；优先运行 `bash scripts/dev-harness/check.sh` 覆盖 symlink、grep guard、test source compile 与 JVM unit test gate。
+5. **功能收尾必须通过 `./gradlew :app:testCpuArm64DebugUnitTest`**（productFlavor 后无裸 Debug 变体，用 cpuArm64 代表；单测 JVM/ABI 无关）；优先运行 `bash scripts/dev-harness/check.sh` 覆盖 symlink、grep guard、test source compile 与 JVM unit test gate。
 6. **ViewModel / Coroutine 单测用 `runTest(mainDispatcherRule.dispatcher) { advanceUntilIdle() }`**。
 7. **DataStore 测试用 `UUID.randomUUID()` 后缀的 prefs 文件名**：避免 "multiple DataStores active" 异常。OpenFlow 主代码用 `openflow_settings`，测试代码用别的 key。
 8. **JNI 单测用 mock**：`WhisperJni` / `LlamaJni` 静态方法在 JVM 单测中不可用，必须 mock。
@@ -31,11 +31,11 @@ OpenFlow 单测 / 仪器测试的强约束。
 ## 命令
 
 ```bash
-./gradlew :app:testDebugUnitTest                              # JVM 单测
-./gradlew :app:testDebugUnitTest --rerun-tasks                # 强制重跑
-./gradlew :app:testDebugUnitTest --tests "<FQN>"              # 单类
-./gradlew :app:connectedDebugAndroidTest                      # 仪器测试
-./gradlew :app:compileDebugUnitTestKotlin                     # 仅编译测试源码（catch 测试 fixture 漂移）
+./gradlew :app:testCpuArm64DebugUnitTest                      # JVM 单测（旧 testDebugUnitTest 已随 flavor 失效）
+./gradlew :app:testCpuArm64DebugUnitTest --rerun-tasks        # 强制重跑
+./gradlew :app:testCpuArm64DebugUnitTest --tests "<FQN>"      # 单类
+./gradlew :app:connectedCpuArm64DebugAndroidTest             # 仪器测试
+./gradlew :app:compileCpuArm64DebugUnitTestKotlin            # 仅编译测试源码（catch 测试 fixture 漂移）
 ```
 
 ## 相关 incidents

@@ -56,22 +56,31 @@ OpenFlow 是一个**类 Typeless Flow 的 Android 语音输入助手**：在任�
 
 ## 构建命令
 
-```bash
-./gradlew :app:assembleDebug                  # 构建 Debug APK（含 NDK 原生编译，首次约 5-15 分钟）
-./gradlew :app:assembleRelease                # 构建 Release APK（需签名环境变量）
-./gradlew :app:assembleRelease -POpenflowEnableVulkan=true -POpenflowEnableOpenCl=true   # GPU 实验包（仅 arm64-v8a；多花 ~5-10 分钟编 Vulkan shader）
-./gradlew :app:testDebugUnitTest              # 单元测试
-./gradlew :app:connectedDebugAndroidTest      # 仪器测试（需设备/模拟器）
-./gradlew :app:lintDebug                      # 发布前 lint，日常 Debug 不需要
+应用按 productFlavor 双维度出包：`backend`(cpu/gpu) × `abi`(arm64/x64)。
 
-# 原生层
-./gradlew :app:externalNativeBuildDebug       # 仅触发 CMake 构建（whisper.cpp + llama.cpp）
-./gradlew :app:configureCMakeDebug            # 仅做 CMake configure
+```bash
+# 应用构建
+./gradlew :app:assembleDebug                  # 日常 Debug：只编 cpu 两 ABI（cpuArm64Debug + cpuX64Debug），含 NDK 原生编译
+./gradlew :app:assembleCpuArm64Debug          # 只编单个变体（真机 arm64；模拟器用 :app:assembleCpuX64Debug）——比 assembleDebug 快一半
+./gradlew :app:assembleRelease                # 一条命令出全部 Release 包：cpu arm64-v8a + cpu x86_64 + gpu arm64-v8a（需签名环境变量）
+./gradlew :app:assembleGpuArm64Debug -PopenflowGpuDebug=true   # 本地验 GPU 包（gpuDebug 默认禁用；含 Vulkan，多花 ~3 分钟）
+./gradlew :app:testCpuArm64DebugUnitTest      # 单元测试（Robolectric/JVM，ABI 无关；旧名 testDebugUnitTest 已随 flavor 失效）
+./gradlew :app:connectedCpuArm64DebugAndroidTest   # 仪器测试（需设备/模拟器）
+./gradlew lint                                # 发布前 lint，日常 Debug 不需要
+
+# 编译加速：ccache（对象级缓存，跨 worktree / clean / CI 命中；CMakeLists 自动探测）
+brew install ccache                           # 本机一次性安装（CI 用 apt-get install ccache）
+ccache --set-config base_dir=$HOME            # 跨 worktree 命中所需（配合 hash_dir=false）；只设一次
+ccache --set-config hash_dir=false
+ccache -s                                     # 查看命中率（冷构建后再跑一次应见高 hit）
 
 # Submodule 维护
 git submodule update --init --recursive       # 首次 / 拉新分支后
 git submodule update --remote --merge         # 升级到 upstream HEAD（务必 review 兼容性）
 ```
+
+GPU/CPU 不再用 `-POpenflowEnableVulkan/-POpenflowEnableOpenCl`，改由 `gpu` flavor 内置；
+Release 一条 `assembleRelease` 同时出 CPU/GPU 三包，产物路径按 flavor 隔离、互不覆盖。
 
 本地功能收尾默认验证 Debug 构建；不要求验证 Release 构建或 lint。
 Release 构建只在签名环境变量齐备或任务明确涉及发布/签名时验证。
@@ -89,7 +98,8 @@ Release 构建只在签名环境变量齐备或任务明确涉及发布/签名�
 - Compose BOM：`2026.05.00`
 - NDK：`29.0.14206865`（r29，最新稳定版；r28+ 默认 16KB 段对齐，无需 CMake 额外 flag）
 - CMake：`3.22.1`
-- ABI Filters：`arm64-v8a` + `x86_64`（经 `splits.abi` 控制；GPU 实验包仅 `arm64-v8a`）
+- ccache：native 编译加速（CMakeLists 顶部自动探测；未装则无缓存、行为同旧）。跨 worktree 命中需全局 `base_dir=$HOME` + `hash_dir=false`
+- ABI / 出包：productFlavor `backend`(cpu/gpu) × `abi`(arm64/x64)。每变体单 ABI（`ndk.abiFilters`），取代旧 `splits.abi`。Release 出 cpu `arm64-v8a` + cpu `x86_64` + gpu `arm64-v8a`；gpu 不出 `x86_64`（`gpu+x64` 变体禁用），gpuDebug 默认禁用
 
 ## 模块架构
 

@@ -5,7 +5,7 @@
 ## MUST
 
 1. **`add_subdirectory(third_party/llama.cpp)` 必须先于 `add_subdirectory(third_party/whisper.cpp)`**。原因：whisper.cpp 的 `if (NOT TARGET ggml)` 守卫保证 ggml 不重定义；llama 先添加才能让 whisper 复用其 ggml。
-2. **仅打 `arm64-v8a` + `x86_64`**：`app/build.gradle.kts` `abiFilters += listOf("arm64-v8a", "x86_64")`。`x86_64` 用于本地 emulator 验证。
+2. **ABI 与 GPU 出包走 productFlavor `backend`(cpu/gpu) × `abi`(arm64/x64)**，每变体单 `ndk.abiFilters`（**不用** `splits.abi`——它与 abiFilters 互斥而 gpu 要按 ABI 收窄）。CPU 出 `arm64-v8a` + `x86_64`（后者本地 emulator 用）；GPU 仅 `arm64-v8a`（`gpu+x64` 变体禁用）；`gpu` debug 默认禁用，`-PopenflowGpuDebug=true` 开。一条 `assembleRelease` 出全部三包。GPU 不再用 `-POpenflowEnable*` 开关。
 3. **禁用所有 examples / tests / tools**（已在 `CMakeLists.txt`）：`LLAMA_BUILD_*`、`WHISPER_BUILD_*`、`GGML_*` 等关键 OFF。
 4. **JNI 函数命名严格匹配 Kotlin `external` 声明**：
    - 格式 `Java_<kotlin.package.with.underscores>_<ClassName>_<methodName>`
@@ -20,6 +20,7 @@
     - 用 tag（不要 master HEAD）：`git checkout v1.x.x`
     - 在本地完整跑通 `:app:assembleDebug` 并真机验证"长按 → 写入"全链路再 commit
     - 同一 commit 只升 whisper 或 llama 之一，不要同时升
+11. **native 编译加速用 ccache**：`CMakeLists.txt` 顶部 `find_program` 命中即设 `CMAKE_C/CXX_COMPILER_LAUNCHER`（在 `add_subdirectory` 之前，覆盖全部 target）。跨 worktree / clean 命中**必须**配全局 `ccache --set-config base_dir=$HOME` + `hash_dir=false`。**不要**改成预编译 `.so` 入库（本仓频繁改 native 易过期；该路线留作稳定后阶段 + Git LFS）。
 
 ## MUST NOT
 
@@ -37,7 +38,7 @@
 
 1. 升级 NDK 时在临时 worktree 完整跑通再合并。
 2. CMake 配置失败时先看 `app/.cxx/Debug/<hash>/<abi>/CMakeFiles/CMakeError.log`。
-3. APK 内 .so 列表用 `unzip -l app/build/outputs/apk/debug/app-debug.apk | grep '\.so'` 验证。
+3. APK 内 .so 列表用 `unzip -l app/build/outputs/apk/cpuArm64/debug/OpenFlow-cpu-arm64-debug.apk | grep '\.so'` 验证。
 
 ## 相关 incidents
 
