@@ -101,4 +101,14 @@ else
     echo "  SKIP: no per-ABI hash to fill; rerun preflight after a successful Release build" >&2
 fi
 
+echo "[dry] Optional: smoke test on attached device"
+if command -v adb >/dev/null 2>&1 && \
+   adb devices | awk 'NR>1 && $2=="device" {found=1} END {exit !found}'; then
+    echo "  推荐："
+    echo "    bash scripts/release/smoke-test.sh --apk $arm_apk"
+    echo "  （要求 ~/.openflow-smoke-models/ 已放 whisper + llm 默认模型）"
+else
+    echo "  跳过：未检测到 adb 设备（smoke 可选；插入设备后单独跑 scripts/release/smoke-test.sh）"
+fi
+
 echo "Preflight passed."
