@@ -1,9 +1,16 @@
 package com.hank.flow.open
 
 import android.app.Application
+import com.hank.flow.open.history.HistoryStore
 import com.hank.flow.open.log.OpenFlowLog
+import java.io.File
 
 class OpenFlowApp : Application() {
+
+    val historyStore: HistoryStore by lazy {
+        HistoryStore(File(filesDir, "history"))
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this

@@ -11,8 +11,11 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.hank.flow.open.OpenFlowApp
 import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
+import com.hank.flow.open.history.HistoryRecord
+import com.hank.flow.open.history.HistoryStore
 import com.hank.flow.open.insertion.PipelineResult
 import com.hank.flow.open.insertion.TextInserter
 import com.hank.flow.open.insertion.decideOutcome
@@ -51,6 +54,7 @@ class RecordingForegroundService : Service() {
 
     private val settingsStore by lazy { SettingsStore(applicationContext) }
     private val modelStore by lazy { ModelStore(applicationContext) }
+    private val historyStore: HistoryStore get() = OpenFlowApp.instance.historyStore
 
     private var whisperEngine: WhisperEngine? = null
     private var polishEngine: PolishEngine? = null
@@ -125,21 +129,24 @@ class RecordingForegroundService : Service() {
                 val asrStart = System.currentTimeMillis()
                 OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_start")
                 val raw = transcribe(pcm)
+                val asrDurMs = System.currentTimeMillis() - asrStart
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.ASR,
                     "asr_done",
                     mapOf(
                         "textLen" to raw.length,
                         "text" to raw.take(40),
-                        "durMs" to (System.currentTimeMillis() - asrStart),
+                        "durMs" to asrDurMs,
                     ),
                 )
 
                 val polishStart = System.currentTimeMillis()
-                val finalText = if (settings.polishEnabled && raw.isNotBlank()) {
+                val polishAttempted = settings.polishEnabled && raw.isNotBlank()
+                val finalText = if (polishAttempted) {
                     pushState(BallState.Polishing)
                     polish(raw, settings.llmModelId)
                 } else raw
+                val polishDurMs = if (polishAttempted) System.currentTimeMillis() - polishStart else null
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.LLM,
                     "polish_done",
@@ -147,12 +154,22 @@ class RecordingForegroundService : Service() {
                         "polishEnabled" to settings.polishEnabled,
                         "textLen" to finalText.length,
                         "text" to finalText.take(40),
-                        "durMs" to (System.currentTimeMillis() - polishStart),
+                        "durMs" to (polishDurMs ?: 0L),
                     ),
                 )
 
                 val result = runInsertion(finalText)
                 applyResult(result)
+                recordHistory(
+                    pcm = pcm,
+                    raw = raw,
+                    finalText = finalText,
+                    polishAttempted = polishAttempted,
+                    asrModelId = settings.whisperModelId,
+                    llmModelId = settings.llmModelId,
+                    asrDurMs = asrDurMs,
+                    polishDurMs = polishDurMs,
+                )
             } catch (t: Throwable) {
                 OpenFlowLog.e(OpenFlowLog.Tag.FGS, "commit_failed", t)
                 applyResult(PipelineResult.Failed("处理失败:${t.javaClass.simpleName}"))
@@ -160,6 +177,43 @@ class RecordingForegroundService : Service() {
                 OpenFlowLog.flush()
                 stopSelfSafely()
             }
+        }
+    }
+
+    private suspend fun recordHistory(
+        pcm: ShortArray,
+        raw: String,
+        finalText: String,
+        polishAttempted: Boolean,
+        asrModelId: String,
+        llmModelId: String,
+        asrDurMs: Long,
+        polishDurMs: Long?,
+    ) {
+        if (pcm.isEmpty() || raw.isBlank()) return
+        val polished = if (polishAttempted && finalText != raw) finalText else null
+        val effectiveLlmId = if (polishAttempted) llmModelId else null
+        val record = HistoryRecord(
+            id = HistoryStore.newId(),
+            createdAtMs = System.currentTimeMillis(),
+            sampleRate = 16_000,
+            sampleCount = pcm.size,
+            rawText = raw,
+            polishedText = polished,
+            asrModelId = asrModelId,
+            llmModelId = effectiveLlmId,
+            asrDurationMs = asrDurMs,
+            polishDurationMs = if (polishAttempted) polishDurMs else null,
+        )
+        try {
+            historyStore.append(record, pcm)
+            OpenFlowLog.d(
+                OpenFlowLog.Tag.FGS,
+                "history_appended",
+                mapOf("id" to record.id, "samples" to pcm.size),
+            )
+        } catch (t: Throwable) {
+            OpenFlowLog.e(OpenFlowLog.Tag.FGS, "history_append_failed", t)
         }
     }
 

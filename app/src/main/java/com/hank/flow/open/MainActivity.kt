@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.hank.flow.open.ui.debug.DebugScreen
+import com.hank.flow.open.ui.history.HistoryScreen
 import com.hank.flow.open.ui.home.HomeScreen
 import com.hank.flow.open.ui.modeldownload.ModelDownloadScreen
 import com.hank.flow.open.ui.settings.SettingsScreen
@@ -57,6 +58,7 @@ private fun AppRoot() {
             when (tab) {
                 Tab.Home -> HomeScreen()
                 Tab.Models -> ModelDownloadScreen()
+                Tab.History -> HistoryScreen()
                 Tab.Debug -> DebugScreen()
                 Tab.Settings -> SettingsScreen()
             }
@@ -67,6 +69,7 @@ private fun AppRoot() {
 private enum class Tab(val title: String, val icon: String) {
     Home("主页", "🏠"),
     Models("模型", "📦"),
+    History("历史", "📜"),
     Debug("调试", "🛠"),
     Settings("设置", "⚙️"),
 }

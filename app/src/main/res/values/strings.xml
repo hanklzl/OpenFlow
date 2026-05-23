@@ -3,4 +3,22 @@
     <string name="app_name">OpenFlow</string>
     <string name="accessibility_service_description">检测可编辑文本框获得焦点，在其上方显示 OpenFlow 悬浮球。长按悬浮球开始离线语音识别，识别结果会被写入当前输入框。</string>
     <string name="accessibility_service_summary">在输入框旁显示 OpenFlow 语音输入悬浮球</string>
+
+    <string name="history_title">历史</string>
+    <string name="history_empty">还没有任何语音记录</string>
+    <string name="history_clear_all">清空全部</string>
+    <string name="history_clear_confirm_title">清空全部历史？</string>
+    <string name="history_clear_confirm_text">将删除所有语音记录与音频文件，无法恢复。</string>
+    <string name="history_clear_confirm_ok">清空</string>
+    <string name="history_dialog_cancel">取消</string>
+    <string name="history_not_polished">未润色</string>
+    <string name="history_copy_polished">复制润色文本</string>
+    <string name="history_copy_raw">复制原文</string>
+    <string name="history_copied">已复制到剪贴板</string>
+    <string name="history_play">播放</string>
+    <string name="history_delete">删除</string>
+    <string name="history_asr_label">ASR</string>
+    <string name="history_polish_label">润色</string>
+    <string name="history_raw_text_header">ASR 原文</string>
+    <string name="history_duration_ms">%1$d ms</string>
 </resources>
