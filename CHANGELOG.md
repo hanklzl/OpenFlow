@@ -11,6 +11,39 @@
 
 <!-- next-release -->
 
+## [v0.1.1] - 2026-05-23
+
+### 变更详情
+
+#### 新功能
+- feat(asr): 增加 Whisper 词典提示 (17614f3)
+- feat(perf): Phase 6 — Vulkan 后端可行性评估 + 试验性 CMake 钩子 (2cb4469)
+- feat(perf): Phase 5 — KV prefix 缓存 + pipeline/rules.md 补取消语义与失效条件 (a0efc1e)
+- feat(perf): Phase 4 — 流式润色 + 首 token 即写入输入框 (3c03dbc)
+- feat(perf): Phase 2/3 — Qwen3 极速档命名 + 录音中并行预热引擎 (a7b9638)
+- feat(perf): Phase 1 — whisper 参数收紧 + llama 批量增大 + arm64 dotprod (ec021c4)
+- feat(perf): Phase 0 — 引入端到端 pipeline_summary 与 polish metric piggyback (9f2e764)
+- feat(history): 新增语音输入历史 Tab，可查看 / 回放 / 复制 / 清理 (494ccdc)
+
+#### 修复
+- fix(ci): port v0.1.0 hotfix 到 main — release workflow SIGPIPE + gh-pages init (62e3116)
+
+#### 文档
+- docs(changelog): release v0.1.0 [skip ci] (bfc6a1c)
+- docs(public): 增加 README / LICENSE / GitHub Pages 主页 (063b8b5)
+
+#### 杂项
+- chore(release): bump to v0.1.1 + 修复 prev tag 查找可靠性 (e90347f)
+
+#### 合并
+- merge: 合并 main 的 history Tab — 解决 RFS.handleCommit 冲突 (a3c6917)
+
+### 构建产物
+
+- arm64-v8a: `OpenFlow-v0.1.1-arm64-v8a.apk` · 8.1MB · sha256 `0a750077fe20`
+- x86_64: `OpenFlow-v0.1.1-x86_64.apk` · 8.4MB · sha256 `4e80504af01b`
+- mapping: `mapping-v0.1.1.zip` · sha256 `9961062be541` (R8 反混淆用)
+
 ## [v0.1.0] - 2026-05-23
 
 ### 变更详情
