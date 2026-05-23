@@ -25,7 +25,7 @@ object PermissionChecks {
         PermissionItem.Microphone -> PermissionStatus(item, hasRuntimePermission(context, Manifest.permission.RECORD_AUDIO))
         PermissionItem.Notifications -> PermissionStatus(item, hasNotificationsPermission(context))
         PermissionItem.Overlay -> PermissionStatus(item, Settings.canDrawOverlays(context))
-        PermissionItem.Accessibility -> PermissionStatus(item, isAccessibilityServiceEnabled(context, ACCESSIBILITY_SERVICE_FQN))
+        PermissionItem.Accessibility -> PermissionStatus(item, isAccessibilityServiceEnabled(context, accessibilityServiceFqn(context)))
     }
 
     private fun hasRuntimePermission(context: Context, permission: String): Boolean =
@@ -51,6 +51,8 @@ object PermissionChecks {
         return splitter.any { it.equals(fqn, ignoreCase = true) }
     }
 
-    private const val ACCESSIBILITY_SERVICE_FQN =
-        "com.hank.flow.open/com.hank.flow.open.service.FlowAccessibilityService"
+    // `<applicationId>/<服务类 FQN>` 格式，前半段必须等于实际 applicationId；
+    // debug 构建带 .debug 后缀，因此用 packageName 而不是写死。
+    private fun accessibilityServiceFqn(context: Context): String =
+        "${context.packageName}/com.hank.flow.open.service.FlowAccessibilityService"
 }

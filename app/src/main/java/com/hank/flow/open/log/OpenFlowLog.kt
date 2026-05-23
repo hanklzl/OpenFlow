@@ -15,7 +15,8 @@ import java.io.File
  * before init: pre-init events fall back to logcat only.
  *
  * Log files end up at:
- *   /sdcard/Android/data/com.hank.flow.open/files/logan/logs/
+ *   /sdcard/Android/data/<applicationId>/files/logan/logs/
+ * （release 包是 com.hank.flow.open，debug 包是 com.hank.flow.open.debug），
  * which is `adb pull`-able without `run-as` (app-specific external storage).
  *
  * AES key/IV are hardcoded debug values; decoded with tools/logan/decode-logan.sh.

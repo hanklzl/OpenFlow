@@ -11,10 +11,10 @@ import com.hank.flow.open.log.OpenFlowLog
  * [WhisperEngine] and optionally [PolishEngine], and pushes every stage
  * to OpenFlowLog (Tag.ASR / Tag.LLM) under a `debug_asset_*` prefix.
  *
- * Trigger from host machine:
+ * Trigger from host machine (debug 包名带 .debug 后缀)：
  *   adb shell am broadcast \
  *       -a com.hank.flow.open.debug.RUN_ASR_FROM_ASSETS \
- *       -n com.hank.flow.open/.debug.DebugAsrReceiver \
+ *       -n com.hank.flow.open.debug/com.hank.flow.open.debug.DebugAsrReceiver \
  *       --es wavAsset test/jfk.wav \
  *       --es whisperId ggml-tiny-q5_1 \
  *       --es lang auto \
