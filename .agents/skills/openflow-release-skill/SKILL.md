@@ -39,10 +39,9 @@ OpenFlow 用「tag 推送 → GitHub Actions 三 job → 签名 split APK + R8 m
 
 - **MUST**：`version.properties` 是版本号唯一来源。CI 「Validate version consistency」step 校验 tag 字面（去 `v` 前缀）必须等于 `versionName`，且 `versionCode == MAJOR*10000 + MINOR*100 + PATCH`。
 - **MUST**：tag 推送前本地 `bash scripts/release/preflight.sh vX.Y.Z`，任意 step 退出码 ≠ 0 立即中止，**不要**绕过。
-- **MUST**：真机装签名 release APK 验证全链路一次。两种走法等效：
+- **MUST**：真机装签名 release APK 验证全链路一次（R8 + JNI 问题**只在签名 release APK + 真机**能复现，debug 与 emulator 都看不见）。两种走法等效：
   - **自动**：`bash scripts/release/smoke-test.sh` 退出 0
   - **手动**：长按悬浮球 → 录中文 → ASR → 润色 → `ACTION_SET_TEXT` 写入第三方 EditText
-  R8 + JNI 问题**只在签名 release APK + 真机**能复现，debug 与 emulator 都看不见。
 - **MUST**：在 `.worktrees/release-vX.Y.Z` worktree 内操作，遵循 AGENTS.md「任何变更走 worktree」红线；不在 main 直接改。
 - **MUST**：`mapping.zip` 必须随 GitHub Release 上传。线上崩溃栈反混淆**唯一**依赖该文件，丢失即永远无法还原 R8 后的栈。
 - **MUST**：首次发布前 `gh secret list --env release` 核对 7 个 secret 齐备（4 个 `ANDROID_RELEASE_*` + 2 个 `LOGAN_*` + 可选 `ANTHROPIC_API_KEY`）。
