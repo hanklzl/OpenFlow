@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 2,
+  "version": "0.1.0",
+  "versionCode": 100,
+  "releasedAt": "2026-05-23T02:48:39Z",
+  "releaseNotesUrl": "https://github.com/hanklzl/OpenFlow/releases/tag/v0.1.0",
+  "changeLog": [
+    "feat(build): debug 包名加 .debug 后缀允许与 release 并存 (48c464d)",
+    "feat(debug): 增加 ASR 与润色自验证链路 (4ff6941)",
+    "feat(model): 支持在「模型」Tab 选择当前 ASR / LLM 模型 (367b94d)",
+    "feat(log): 增加 ASR / 悬浮球 / DebugScreen 链路诊断打点 (47ca4dd)",
+    "feat(release): 接入 vX.Y.Z 发布流水线 + openflow-release-skill (e98b6ff)",
+    "feat(ux): 重设计悬浮球状态机与录音链路反馈 (a7278a8)",
+    "feat(harness): 增加 memory 暂存层 + memory-sediment-skill + 升级 curator 自主合入 (e4880ea)",
+    "feat(build): 增加 x86_64 ABI 支持 (e4bcf9a)"
+  ],
+  "variants": {
+    "arm64-v8a": {
+      "download": [
+        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.0/OpenFlow-v0.1.0-arm64-v8a.apk",
+        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.0/release/OpenFlow-v0.1.0-arm64-v8a.apk"
+      ],
+      "size": 7854504,
+      "sha256": "f3900adddff3b60b5a6301ac96a0846b330a50f671b34110566a5c3a66fce1fd"
+    },
+    "x86_64": {
+      "download": [
+        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.0/OpenFlow-v0.1.0-x86_64.apk",
+        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.0/release/OpenFlow-v0.1.0-x86_64.apk"
+      ],
+      "size": 8178081,
+      "sha256": "fec2c3effee84e9213a42284c86cf88bb29ba59d83832ee1b251d24439d7dc51"
+    }
+  },
+  "mapping": {
+    "url": "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.0/mapping-v0.1.0.zip",
+    "sha256": "c1602a9e70a061e7587922f095211bb8f5174e6cbb4caf6b13a1c7673e84dd4d"
+  }
+}
