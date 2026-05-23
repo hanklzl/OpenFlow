@@ -12,6 +12,13 @@
 - **NPU 路径暂不适合当前 GGUF + llama.cpp 架构**：Snapdragon QNN/HTP、MediaTek APU、Samsung ENN、MediaPipe LLM Inference 都需要重新量化或导出成厂商格式，相当于替换推理栈。
 - **预期收益**：如果 Vulkan 或 OpenCL 在真机端跑通，Whisper encoder 可能提升 2-4 倍，LLM prefill 可能提升 2-3 倍；LLM decode 受统一内存带宽影响，通常只有 1.2-1.5 倍。短文本润色链路整体预计可减少 30%-50% 的后处理延迟。
 
+## 真机实测记录
+
+- **2026-05-24 · Xiaomi 13 Pro（SM8550 / 骁龙 8 Gen 2 / Adreno 740 / Android 16）**
+  - **Vulkan ✓**：ggml 枚举到 1 个 GPU 设备 `Vulkan0 = Adreno (TM) 740`（igpu），`Auto` 偏好自动解析为 Vulkan，硬件加速开关可用。Adreno 740 满足 ggml-vulkan 的 `storageBuffer16BitAccess` 要求，未被设备特性过滤。
+  - **OpenCL ✗（已知限制）**：尽管设备自带厂商 `libOpenCL.so`（系统语音助手 `com.miui.voiceassist` 在用）、且本 App 的 `<uses-native-library libOpenCL.so>` 已被 `nativeloader` 接受，静态链接的 Khronos OpenCL-ICD-Loader 仍枚举到 **0 个平台/设备**（`clGetPlatformIDs` 找不到 vendor ICD 清单）。因 `Auto` 会自动落到 Vulkan，故不阻塞 GPU 加速；若要让 OpenCL 路径在 Adreno 上可用，需另查 ICD 清单路径或直接 `dlopen` vendor `libOpenCL.so`，留作单独课题。
+  - **探测时机 bug（已修）**：设置页在 native lib（`libopenflow_jni.so`）尚未加载时就探测 GPU——它只在 `WhisperJni.init` 里懒加载，没用过 ASR/润色时不会触发。结果 `LlamaJni.nativeSupportsGpuOffload()` / `nativeListBackendDevices()` 抛 `UnsatisfiedLinkError`，被 `JniLlamaBridge` 的 `runCatching{}.getOrDefault(...)` 吞掉，误报为 `NativeBackendMissing`（"当前 native 后端未发现可用 GPU 设备"）。修复：`JniLlamaBridge.supportsGpuOffload/listBackendDevices` 探测前先读 `LlamaJni.loaded` 触发 `System.loadLibrary`，并对真正加载失败兜底。同时为 ggml/llama 装了 logcat 日志桥（tag `GGML`）+ registry/device 边界日志，便于后续真机诊断。
+
 ## 默认启用前的剩余阻塞
 
 | 阻塞项 | 说明 |
