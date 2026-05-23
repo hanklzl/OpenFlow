@@ -1,0 +1,67 @@
+# GitHub Pages 配置 —— 仅服务 docs/ 下「对外」页面
+# Source: main 分支 /docs 目录（在仓库 Settings → Pages 中配置）
+# gh-pages 分支由 .github/workflows/android-release-apk.yml 用于发布 release/version.json，
+# 与本 Pages 站完全互不干扰。
+
+title: OpenFlow
+description: Android 离线语音输入助手 · whisper.cpp + llama.cpp
+url: "https://hanklzl.github.io"
+baseurl: "/OpenFlow"
+lang: zh-CN
+
+# 主题：使用 just-the-docs（GitHub Pages 通过 jekyll-remote-theme 原生支持，无需自建 Action）
+remote_theme: just-the-docs/just-the-docs
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
+
+# 关闭 Liquid 在不希望渲染的内容上动手脚（已 exclude 的目录不会被处理，但额外保险）
+permalink: pretty
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+
+# —— 严格排除内部 dev-harness / superpowers 文档 —— #
+# 这两块是仓库内部 AI 助手知识库，绝不能在公网 Pages 上以友好 URL 暴露。
+# 顺带排除根目录之外的 README.md / 脚本 / 索引文件。
+exclude:
+  - dev-harness/
+  - superpowers/
+  - DOCS_STATUS.md
+  - "**/README.md"
+  - "*.sh"
+  - Gemfile
+  - Gemfile.lock
+  - vendor/
+
+# 只显式包含 docs/ 顶层的对外页面（include 不会跨目录递归，所以已 exclude 的子目录依然不会进站）
+include:
+  - assets
+
+# —— just-the-docs 主题选项 —— #
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 2
+  preview_words_before: 3
+  preview_words_after: 3
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
+  button: false
+
+# 顶部辅助链接：跳回 GitHub 仓库
+aux_links:
+  "GitHub 仓库":
+    - "https://github.com/hanklzl/OpenFlow"
+  "下载 APK":
+    - "https://github.com/hanklzl/OpenFlow/releases/latest"
+
+aux_links_new_tab: true
+
+# 页脚
+footer_content: "OpenFlow · <a href=\"https://github.com/hanklzl/OpenFlow/blob/main/LICENSE\">GPL-3.0-or-later</a> · 第三方组件归属见 <a href=\"https://github.com/hanklzl/OpenFlow/blob/main/THIRD_PARTY_NOTICES.md\">THIRD_PARTY_NOTICES</a>"
+
+# 颜色方案：跟随系统
+color_scheme: light
