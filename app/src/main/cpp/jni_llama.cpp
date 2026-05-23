@@ -18,6 +18,15 @@ struct LlamaHolder {
     const llama_vocab *vocab = nullptr;
 };
 
+// Phase 5: a snapshot of a llama context's seq-0 KV state after decoding
+// some fixed prefix (system prompt + ChatML user-tag opener). Reused across
+// polish() calls so each invocation only prefills the user's transcript +
+// suffix, not the 70–90 tokens of constant boilerplate.
+struct PrefixCache {
+    std::vector<uint8_t> blob;
+    int32_t tokenCount = 0;
+};
+
 bool gBackendInitialized = false;
 
 long long nowMs() {
@@ -315,6 +324,211 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerateStreaming(
          "prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
          out.size(), generatedTokens, eogReached ? 1 : 0, cancelled ? 1 : 0,
          prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
+
+    llama_sampler_free(sampler);
+
+    char header[160];
+    int headerLen = snprintf(header, sizeof(header),
+                             "\x01prefill_ms=%lld,decode_ms=%lld,first_token_ms=%lld\x01",
+                             prefillMs, decodeMs, firstTokenMs);
+    std::string combined;
+    combined.reserve(static_cast<size_t>(headerLen) + out.size());
+    combined.append(header, static_cast<size_t>(headerLen));
+    combined.append(out);
+    return env->NewStringUTF(combined.c_str());
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativePrewarmPrefix(
+        JNIEnv *env, jobject /*thiz*/,
+        jlong handle, jstring jPrefix) {
+    auto *h = reinterpret_cast<LlamaHolder *>(handle);
+    if (h == nullptr || h->ctx == nullptr) return 0;
+
+    const char *cPrefix = env->GetStringUTFChars(jPrefix, nullptr);
+    std::string prefix(cPrefix);
+    env->ReleaseStringUTFChars(jPrefix, cPrefix);
+
+    auto tokens = tokenize(h->vocab, prefix, /*addSpecial=*/true, /*parseSpecial=*/true);
+    if (tokens.empty()) {
+        LOGE("nativePrewarmPrefix tokenize empty");
+        return 0;
+    }
+
+    const long long t0 = nowMs();
+    llama_memory_t mem = llama_get_memory(h->ctx);
+    llama_memory_clear(mem, /*data=*/true);
+
+    int pos = 0;
+    const int batchSize = 64;
+    while (pos < (int)tokens.size()) {
+        const int chunk = std::min(batchSize, (int)tokens.size() - pos);
+        llama_batch batch = llama_batch_get_one(&tokens[pos], chunk);
+        if (llama_decode(h->ctx, batch) != 0) {
+            LOGE("nativePrewarmPrefix decode failed at pos=%d", pos);
+            return 0;
+        }
+        pos += chunk;
+    }
+
+    const size_t size = llama_state_seq_get_size(h->ctx, /*seq_id=*/0);
+    if (size == 0) {
+        LOGE("nativePrewarmPrefix state_seq_get_size returned 0");
+        return 0;
+    }
+    auto *cache = new PrefixCache();
+    cache->blob.resize(size);
+    cache->tokenCount = static_cast<int32_t>(tokens.size());
+    const size_t actual = llama_state_seq_get_data(
+        h->ctx, cache->blob.data(), cache->blob.size(), /*seq_id=*/0);
+    if (actual == 0) {
+        LOGE("nativePrewarmPrefix state_seq_get_data returned 0");
+        delete cache;
+        return 0;
+    }
+    cache->blob.resize(actual);
+    LOGI("nativePrewarmPrefix tokens=%d blobBytes=%zu durMs=%lld",
+         cache->tokenCount, actual, nowMs() - t0);
+    return reinterpret_cast<jlong>(cache);
+}
+
+JNIEXPORT void JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativeFreePrefix(
+        JNIEnv * /*env*/, jobject /*thiz*/, jlong prefixHandle) {
+    auto *c = reinterpret_cast<PrefixCache *>(prefixHandle);
+    if (c != nullptr) delete c;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativePolishStreamingWithPrefix(
+        JNIEnv *env, jobject /*thiz*/,
+        jlong handle, jlong prefixHandle,
+        jstring jUserText, jstring jSuffix,
+        jint maxNewTokens, jfloat temperature, jfloat topP,
+        jobject sink) {
+    auto *h = reinterpret_cast<LlamaHolder *>(handle);
+    auto *cache = reinterpret_cast<PrefixCache *>(prefixHandle);
+    if (h == nullptr || h->ctx == nullptr) return env->NewStringUTF("");
+    if (cache == nullptr || cache->blob.empty()) return env->NewStringUTF("");
+    if (sink == nullptr) return env->NewStringUTF("");
+
+    jclass sinkCls = env->GetObjectClass(sink);
+    jmethodID onTokenMid = env->GetMethodID(sinkCls, "onToken", "(Ljava/lang/String;)Z");
+    env->DeleteLocalRef(sinkCls);
+    if (onTokenMid == nullptr) {
+        LOGE("TokenSink.onToken(Ljava/lang/String;)Z not found");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return env->NewStringUTF("");
+    }
+
+    const long long totalStartMs = nowMs();
+    const char *cUser = env->GetStringUTFChars(jUserText, nullptr);
+    const char *cSuffix = env->GetStringUTFChars(jSuffix, nullptr);
+    std::string body;
+    body.reserve(std::strlen(cUser) + std::strlen(cSuffix));
+    body.append(cUser).append(cSuffix);
+    env->ReleaseStringUTFChars(jUserText, cUser);
+    env->ReleaseStringUTFChars(jSuffix, cSuffix);
+    LOGI("nativePolishStreamingWithPrefix start bodyBytes=%zu prefixTokens=%d "
+         "maxNewTokens=%d temp=%.2f topP=%.2f",
+         body.size(), cache->tokenCount, maxNewTokens, temperature, topP);
+
+    // Restore prefix KV state into seq 0. We clear memory first because
+    // llama_state_seq_set_data expects an empty seq slot.
+    llama_memory_t mem = llama_get_memory(h->ctx);
+    llama_memory_clear(mem, /*data=*/true);
+    const long long restoreStartMs = nowMs();
+    const size_t loaded = llama_state_seq_set_data(
+        h->ctx, cache->blob.data(), cache->blob.size(), /*dest_seq_id=*/0);
+    if (loaded == 0) {
+        LOGE("nativePolishStreamingWithPrefix state_seq_set_data failed");
+        return env->NewStringUTF("");
+    }
+    const long long restoreMs = nowMs() - restoreStartMs;
+
+    // Tokenize body with addSpecial=false — BOS is already in the cached prefix.
+    auto tokens = tokenize(h->vocab, body, /*addSpecial=*/false, /*parseSpecial=*/true);
+    if (tokens.empty()) {
+        LOGE("nativePolishStreamingWithPrefix body tokenize empty");
+        return env->NewStringUTF("");
+    }
+
+    const int batchSize = 64;
+    int pos = 0;
+    int chunkCount = 0;
+    const long long promptDecodeStartMs = nowMs();
+    while (pos < (int)tokens.size()) {
+        const int chunk = std::min(batchSize, (int)tokens.size() - pos);
+        llama_batch batch = llama_batch_get_one(&tokens[pos], chunk);
+        if (llama_decode(h->ctx, batch) != 0) {
+            LOGE("nativePolishStreamingWithPrefix decode failed at pos=%d", pos);
+            return env->NewStringUTF("");
+        }
+        pos += chunk;
+        ++chunkCount;
+    }
+    const long long prefillMs = nowMs() - promptDecodeStartMs;
+    LOGI("nativePolishStreamingWithPrefix body_decode_done bodyTokens=%zu chunks=%d "
+         "restoreMs=%lld prefillMs=%lld",
+         tokens.size(), chunkCount, restoreMs, prefillMs);
+
+    auto sparams = llama_sampler_chain_default_params();
+    llama_sampler *sampler = llama_sampler_chain_init(sparams);
+    if (topP < 1.0f) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+    }
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    } else {
+        llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    }
+
+    std::string out;
+    out.reserve(static_cast<size_t>(maxNewTokens) * 4);
+
+    const long long generateStartMs = nowMs();
+    long long firstTokenMs = -1;
+    int generatedTokens = 0;
+    bool eogReached = false;
+    bool cancelled = false;
+    for (int i = 0; i < maxNewTokens; ++i) {
+        llama_token id = llama_sampler_sample(sampler, h->ctx, -1);
+        if (llama_vocab_is_eog(h->vocab, id)) {
+            eogReached = true;
+            break;
+        }
+        if (firstTokenMs < 0) firstTokenMs = nowMs() - generateStartMs;
+        std::string piece = tokenToString(h->vocab, id);
+        out += piece;
+        ++generatedTokens;
+
+        jstring jPiece = env->NewStringUTF(piece.c_str());
+        jboolean keepGoing = env->CallBooleanMethod(sink, onTokenMid, jPiece);
+        env->DeleteLocalRef(jPiece);
+        if (env->ExceptionCheck()) {
+            LOGE("TokenSink.onToken threw");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            cancelled = true;
+            break;
+        }
+        if (!keepGoing) {
+            cancelled = true;
+            break;
+        }
+
+        llama_batch one = llama_batch_get_one(&id, 1);
+        if (llama_decode(h->ctx, one) != 0) {
+            LOGE("nativePolishStreamingWithPrefix gen decode failed step=%d", i);
+            break;
+        }
+    }
+    const long long decodeMs = nowMs() - generateStartMs;
+    LOGI("nativePolishStreamingWithPrefix done outBytes=%zu tokens=%d eog=%d cancelled=%d "
+         "restoreMs=%lld prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
+         out.size(), generatedTokens, eogReached ? 1 : 0, cancelled ? 1 : 0,
+         restoreMs, prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
 
     llama_sampler_free(sampler);
 

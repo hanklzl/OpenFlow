@@ -20,6 +20,31 @@ object LlamaJni {
         topP: Float,
         sink: TokenSink,
     ): String
+    /**
+     * Phase 5: prefills [prefixText] into the model context and saves the
+     * resulting KV state as an opaque cache blob. Returns a Long handle that
+     * must be paired with [nativeFree] and [nativeFreePrefix] on release.
+     * Returns 0 on failure.
+     */
+    external fun nativePrewarmPrefix(handle: Long, prefixText: String): Long
+
+    /**
+     * Polishes a single user transcript by restoring the [prefixHandle] KV
+     * state into seq 0, then prefilling only `userText + suffix` and sampling.
+     * Returns the same metric-piggybacked string format as [nativeGenerateStreaming].
+     */
+    external fun nativePolishStreamingWithPrefix(
+        handle: Long,
+        prefixHandle: Long,
+        userText: String,
+        suffix: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: TokenSink,
+    ): String
+
+    external fun nativeFreePrefix(prefixHandle: Long)
     external fun nativeFree(handle: Long)
 
     fun interface TokenSink {

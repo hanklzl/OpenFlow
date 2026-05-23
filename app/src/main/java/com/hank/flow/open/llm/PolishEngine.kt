@@ -14,6 +14,8 @@ class PolishEngine(
     private val mutex = Mutex()
     @Volatile private var handle: Long = 0L
     @Volatile private var lastLoadMs: Long = -1L
+    @Volatile private var prefixHandle: Long = 0L
+    @Volatile private var prefixSignature: String? = null
 
     suspend fun ensureLoaded(): Boolean = mutex.withLock {
         if (handle != 0L) {
@@ -25,9 +27,29 @@ class PolishEngine(
         runCatching { LlamaJni.nativeInit(modelPath, CTX_SIZE, 0) }
             .onSuccess { handle = it }
             .onFailure { Log.e(TAG, "nativeInit failed", it) }
+        if (handle != 0L) {
+            // Phase 5: prewarm the system+ChatML prefix into a KV-state blob
+            // so each polish only prefills the user transcript + suffix.
+            // Failure here is non-fatal — polish falls back to the full prompt path.
+            val prefixText = PolishPrompt.systemPrefix()
+            val expectedSig = signatureFor(prefixText)
+            runCatching { LlamaJni.nativePrewarmPrefix(handle, prefixText) }
+                .onSuccess { ptr ->
+                    if (ptr != 0L) {
+                        prefixHandle = ptr
+                        prefixSignature = expectedSig
+                    } else {
+                        Log.w(TAG, "nativePrewarmPrefix returned 0; falling back to full prompt")
+                    }
+                }
+                .onFailure { Log.e(TAG, "nativePrewarmPrefix failed", it) }
+        }
         lastLoadMs = System.currentTimeMillis() - t0
         handle != 0L
     }
+
+    private fun signatureFor(prefixText: String): String =
+        "$modelPath::$isQwen3::$CTX_SIZE::${prefixText.hashCode()}"
 
     suspend fun polish(rawText: String, maxNewTokens: Int = MAX_NEW_TOKENS): PolishResult {
         if (rawText.isBlank()) return PolishResult(rawText)
@@ -66,7 +88,6 @@ class PolishEngine(
         if (rawText.isBlank()) return PolishResult(rawText)
         if (!ensureLoaded()) return PolishResult(rawText, loadMs = lastLoadMs)
         val loadMs = lastLoadMs
-        val prompt = PolishPrompt.build(rawText, appendNoThink = isQwen3)
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 runCatching {
@@ -75,9 +96,25 @@ class PolishEngine(
                         val delta = filter.consume(piece)
                         if (delta.isEmpty()) true else onCleanDelta(delta)
                     }
-                    val raw = LlamaJni.nativeGenerateStreaming(
-                        handle, prompt, maxNewTokens, TEMPERATURE, TOP_P, sink,
-                    )
+                    val expectedSig = signatureFor(PolishPrompt.systemPrefix())
+                    val usePrefix = prefixHandle != 0L && prefixSignature == expectedSig
+                    val raw = if (usePrefix) {
+                        LlamaJni.nativePolishStreamingWithPrefix(
+                            handle,
+                            prefixHandle,
+                            rawText,
+                            PolishPrompt.userSuffix(appendNoThink = isQwen3),
+                            maxNewTokens,
+                            TEMPERATURE,
+                            TOP_P,
+                            sink,
+                        )
+                    } else {
+                        val prompt = PolishPrompt.build(rawText, appendNoThink = isQwen3)
+                        LlamaJni.nativeGenerateStreaming(
+                            handle, prompt, maxNewTokens, TEMPERATURE, TOP_P, sink,
+                        )
+                    }
                     buildResult(raw, loadMs)
                 }.getOrElse {
                     Log.e(TAG, "polishStreaming failed", it)
@@ -88,6 +125,11 @@ class PolishEngine(
     }
 
     suspend fun release() = mutex.withLock {
+        if (prefixHandle != 0L) {
+            runCatching { LlamaJni.nativeFreePrefix(prefixHandle) }
+            prefixHandle = 0L
+            prefixSignature = null
+        }
         if (handle != 0L) {
             runCatching { LlamaJni.nativeFree(handle) }
             handle = 0L

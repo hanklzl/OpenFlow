@@ -13,6 +13,14 @@
 7. **PCM 仅活在内存**：录音结束 → 转写 → 立即释放。不写到磁盘做"重放"。
 8. **`Dispatchers.Default` 上跑 transcribe / polish**：避免阻塞 IO 线程池。
 9. **`TextInserter` 必须读取 `AccessibilityNodeInfo.isShowingHintText`，并将其为 `true` 时的 `node.text` 视为空内容**；后续的 splice / 光标计算只能基于这个归一化后的值。`node.text` 在 EditText 处于"显示 hint placeholder"时会返回 hint 字符串而不是空串，直接拼接会把 hint 字面写进 EditText（见 [INC-SERVICE-0002](../incidents/INC-SERVICE-0002.md)）。归一化逻辑必须封装在 `insertion/TextInsertionPlan.kt` 的 `TextInsertionState.effectiveCurrent` 中，并保留对应 JVM 单测。
+10. **Streaming insert 取消语义 = 保留已写入文本**：用户上滑取消时，`cancelStreamingFlag` 让 native sample 循环在下次 token 回调时返回 false 中止；**已通过 `TextInserter.updateStreaming` 写入 EditText 的部分不会被回滚**。原因：a11y 没有原子回滚 API；保留语义对用户也更自然（屏幕上已看到的字不应突然消失）。如果未来要改成"回滚"，需要在 `tryStreamingPolishAndInsert` 入口 snapshot 原 EditText 文本，cancel 时再 `ACTION_SET_TEXT` 还原。
+11. **`PolishEngine` 的 KV prefix 缓存失效条件**：必须在以下任一情形重建 `prefixHandle`（当前实现通过 `release()` + 下一次 `ensureLoaded()` 自然完成），否则会用错位的 KV 状态生成文本：
+    - 模型切换（`modelPath` 或 `isQwen3` 变化）
+    - `PolishPrompt.systemPrefix()` 内容变化（hashCode 进 `signatureFor`）
+    - `CTX_SIZE` 等 cparams 变化
+    - `nativeFree` 已调用（handle 失效，blob 也无效）
+    
+    签名实现见 `PolishEngine.signatureFor`；变更上述任一字段时务必更新签名计算。
 
 ## MUST NOT
 
@@ -33,6 +41,8 @@
 | Setting | 当前接通状态 | 作用点 |
 |---|---|---|
 | `polishEnabled` | ✅ | `handleCommit` 是否调 `polish` |
+| `polishWarmupEnabled` | ✅ | `handleStart` 是否并行预热 `PolishEngine.ensureLoaded` |
+| `polishStreamingEnabled` | ✅ | `handleCommit` 是否走 `tryStreamingPolishAndInsert`（首 token 即写入） |
 | `swipeUpCancelEnabled` | ⚠️ 待接通 | `FloatingBallView` 是否进入 CANCELING |
 | `waveformEnabled` | ⚠️ 待接通 | `FloatingBallView` 是否展开为波形 UI |
 | `editBeforeInsertEnabled` | ⚠️ 待接通 | 写入前是否弹卡片让用户改 |
