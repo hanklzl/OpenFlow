@@ -39,7 +39,10 @@ OpenFlow 用「tag 推送 → GitHub Actions 三 job → 签名 split APK + R8 m
 
 - **MUST**：`version.properties` 是版本号唯一来源。CI 「Validate version consistency」step 校验 tag 字面（去 `v` 前缀）必须等于 `versionName`，且 `versionCode == MAJOR*10000 + MINOR*100 + PATCH`。
 - **MUST**：tag 推送前本地 `bash scripts/release/preflight.sh vX.Y.Z`，任意 step 退出码 ≠ 0 立即中止，**不要**绕过。
-- **MUST**：真机装签名 release APK 跑长按 → 录音 → ASR → 润色 → 插入全链路一次。R8 + JNI 问题**只在签名 release APK + 真机**能复现，debug 与 emulator 都看不见。
+- **MUST**：真机装签名 release APK 验证全链路一次。两种走法等效：
+  - **自动**：`bash scripts/release/smoke-test.sh` 退出 0
+  - **手动**：长按悬浮球 → 录中文 → ASR → 润色 → `ACTION_SET_TEXT` 写入第三方 EditText
+  R8 + JNI 问题**只在签名 release APK + 真机**能复现，debug 与 emulator 都看不见。
 - **MUST**：在 `.worktrees/release-vX.Y.Z` worktree 内操作，遵循 AGENTS.md「任何变更走 worktree」红线；不在 main 直接改。
 - **MUST**：`mapping.zip` 必须随 GitHub Release 上传。线上崩溃栈反混淆**唯一**依赖该文件，丢失即永远无法还原 R8 后的栈。
 - **MUST**：首次发布前 `gh secret list --env release` 核对 7 个 secret 齐备（4 个 `ANDROID_RELEASE_*` + 2 个 `LOGAN_*` + 可选 `ANTHROPIC_API_KEY`）。
@@ -95,12 +98,47 @@ bash scripts/release/preflight.sh vX.Y.Z
 
 ### 5. 真机冒烟（**硬要求**）
 
-把 preflight 输出的 `app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk` 装到一台真机，跑：
+装 preflight 输出的 release APK 到真机验证全链路一次。两种走法等效。
+
+#### 自动版（推荐）
+
+**一次性准备**（首次跑前完成）：
+
+```bash
+mkdir -p ~/.openflow-smoke-models
+# Whisper 最轻档（32 MB）
+curl -L -o ~/.openflow-smoke-models/ggml-tiny-q5_1.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
+# LLM 极速档（~400 MB）— 对应 ModelCatalog.llmTinyNewer
+curl -L -o ~/.openflow-smoke-models/qwen3-0.6b-q4_k_m.gguf \
+  https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf
+```
+
+**每次发布前**：
+
+```bash
+bash scripts/release/smoke-test.sh
+# 退出码：0 通过 / 1 失败 / 2 setup 错（缺设备 / 缺 APK / 缺模型）
+```
+
+脚本动作：adb install release APK → push 模型到 /data/local/tmp → broadcast `INSTALL_MODEL_FROM_TMP` 让 app 自己搬到 filesDir/models/（幂等，size 一致跳过 copy）→ broadcast `RUN_ASR_FROM_ASSETS` 跑 jfk.wav → 监听 `OpenFlowLog`：
+
+- ✅ `debug_asset_finished` → 退出 0
+- ❌ `debug_asset_abort_*` / `service_start_failed` / `FATAL EXCEPTION` → 退出 1，失败时 `run-as` 尝试拉 Logan db 留 `smoke-fail-logan-<ts>.tar`
+- ❌ 60s 超时 → 退出 1
+
+依赖：`com.hank.flow.open.permission.DEBUG_SMOKE`（signature）保护 `DebugAsrReceiver` + `DebugAssetPipelineService` + `DebugModelInstallReceiver`，adb shell 默认通过；外部应用无法触发。
+
+**首次约 50–70s（含 push ~400 MB Qwen3-0.6b），第二次起约 12–18s**。
+
+#### 手动版（fallback）
+
+设备没插 USB / 无 adb / 想验证全 UI 交互流（含 `ACTION_SET_TEXT` 写入第三方 EditText）时仍走人工：
 
 1. 启动 → 三 tab 渲染正常
-2. 长按悬浮球 → 录一句中文 → 释放 → ASR 出文 → 润色 → 文本被 `ACTION_SET_TEXT` 写入第三方 `EditText`
+2. 长按悬浮球 → 录中文 → 释放 → ASR 出文 → 润色 → 文本插入第三方 EditText
 
-如果第 2 步任意环节崩了或卡住 → 进入下方「R8 紧急回滚」决策树。**真机绿之前不要推 tag**。
+如果任意环节崩了或卡住 → 进入下方「R8 紧急回滚」决策树。**真机绿（自动或手动任一）之前不要推 tag**。
 
 ### 6. commit + tag + push
 
@@ -190,6 +228,9 @@ CI 全绿后逐条勾：
 | `gh release upload` 失败「already exists」 | 同 tag 已存在 release（CI 重试或回滚后未清干净） | `gh release upload vX.Y.Z <file> --clobber`，或先 `gh release delete vX.Y.Z --yes` |
 | CHANGELOG bot push 失败 | main 分支保护阻止 `github-actions[bot]` 直推 | 加 bot bypass 或操作者手动补 changelog 后 PR；不阻断 release 主流程 |
 | `keytool` 列不出 alias | `ANDROID_RELEASE_STORE_PASSWORD` 错或 `.jks` 路径错 | 重新 `source .env.release.local`，确认 `keytool -list -v -keystore "$ANDROID_RELEASE_KEYSTORE_PATH"` 能跑通 |
+| smoke `debug_asset_abort_no_model` | 模型 INSTALL broadcast 未生效 / 设备已有模型 size 与本机不一致 | 看 logcat `debug_model_install_*`；`smoke-test.sh --force-reinstall` 重传 |
+| smoke setup exit 2「缺模型」 | `~/.openflow-smoke-models/` 缺文件 | 按 SKILL 第 5 步「一次性准备」段重下 |
+| smoke `service_start_failed` | release APK signature permission 不匹配（用了不同 keystore） | 确认 `.env.release.local` 指向同一个 keystore；先 `adb uninstall com.hank.flow.open` 再试 |
 
 ## 首次启用须知（仅对 v0.1.0 等首次 release 适用）
 
