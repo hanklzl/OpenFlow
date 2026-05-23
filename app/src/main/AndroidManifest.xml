@@ -16,6 +16,10 @@
         </intent>
     </queries>
 
+    <permission
+        android:name="com.hank.flow.open.permission.DEBUG_SMOKE"
+        android:protectionLevel="signature" />
+
     <application
         android:name=".OpenFlowApp"
         android:allowBackup="false"
@@ -54,6 +58,29 @@
             android:name=".service.RecordingForegroundService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name=".debug.DebugAsrReceiver"
+            android:exported="true"
+            android:permission="com.hank.flow.open.permission.DEBUG_SMOKE">
+            <intent-filter>
+                <action android:name="com.hank.flow.open.debug.RUN_ASR_FROM_ASSETS" />
+            </intent-filter>
+        </receiver>
+
+        <service
+            android:name=".debug.DebugAssetPipelineService"
+            android:exported="true"
+            android:permission="com.hank.flow.open.permission.DEBUG_SMOKE" />
+
+        <receiver
+            android:name=".debug.DebugModelInstallReceiver"
+            android:exported="true"
+            android:permission="com.hank.flow.open.permission.DEBUG_SMOKE">
+            <intent-filter>
+                <action android:name="com.hank.flow.open.debug.INSTALL_MODEL_FROM_TMP" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

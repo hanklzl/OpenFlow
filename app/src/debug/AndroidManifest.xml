@@ -2,17 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
-        <receiver
-            android:name=".debug.DebugAsrReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="com.hank.flow.open.debug.RUN_ASR_FROM_ASSETS" />
-            </intent-filter>
-        </receiver>
-
-        <service
-            android:name=".debug.DebugAssetPipelineService"
-            android:exported="true" />
     </application>
 
 </manifest>
