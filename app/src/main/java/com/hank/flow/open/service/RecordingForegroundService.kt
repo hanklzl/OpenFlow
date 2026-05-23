@@ -14,6 +14,7 @@ import androidx.core.app.ServiceCompat
 import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
 import com.hank.flow.open.insertion.PipelineResult
+import com.hank.flow.open.insertion.StreamingHandle
 import com.hank.flow.open.insertion.TextInserter
 import com.hank.flow.open.insertion.decideOutcome
 import com.hank.flow.open.asr.WhisperResult
@@ -30,6 +31,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -53,6 +55,7 @@ class RecordingForegroundService : Service() {
     private var rmsJob: Job? = null
     private var warmupJob: Job? = null
     private var capturing = false
+    @Volatile private var cancelStreamingFlag = false
 
     private val settingsStore by lazy { SettingsStore(applicationContext) }
     private val modelStore by lazy { ModelStore(applicationContext) }
@@ -84,6 +87,7 @@ class RecordingForegroundService : Service() {
 
     private fun handleStart() {
         if (capturing) return
+        cancelStreamingFlag = false
         startForegroundCompat()
         recorder.start(scope)
         capturing = recorder.isCapturing
@@ -188,9 +192,20 @@ class RecordingForegroundService : Service() {
                     ),
                 )
 
-                polishResult = if (settings.polishEnabled && asrResult.text.isNotBlank()) {
-                    pushState(BallState.Polishing)
-                    polish(asrResult.text, settings.llmModelId)
+                val polishWanted = settings.polishEnabled && asrResult.text.isNotBlank()
+                var streamingTookOver = false
+                if (polishWanted) pushState(BallState.Polishing)
+
+                polishResult = if (polishWanted) {
+                    val streamed = if (settings.polishStreamingEnabled) {
+                        tryStreamingPolishAndInsert(asrResult.text, settings.llmModelId)
+                    } else null
+                    if (streamed != null) {
+                        streamingTookOver = true
+                        streamed
+                    } else {
+                        polish(asrResult.text, settings.llmModelId)
+                    }
                 } else {
                     PolishResult(asrResult.text)
                 }
@@ -199,6 +214,7 @@ class RecordingForegroundService : Service() {
                     "polish_done",
                     mapOf(
                         "polishEnabled" to settings.polishEnabled,
+                        "streaming" to streamingTookOver,
                         "textLen" to polishResult.text.length,
                         "text" to polishResult.text.take(40),
                         "loadMs" to polishResult.loadMs,
@@ -208,9 +224,22 @@ class RecordingForegroundService : Service() {
                     ),
                 )
 
-                val insertStart = System.currentTimeMillis()
-                val result = runInsertion(polishResult.text)
-                insertMs = System.currentTimeMillis() - insertStart
+                val result: PipelineResult
+                if (streamingTookOver) {
+                    // Text already inserted during streaming; record 0 ms here so
+                    // pipeline_summary doesn't double-count the streaming time.
+                    insertMs = 0L
+                    result = decideOutcome(
+                        text = polishResult.text,
+                        nodeAvailable = true,
+                        setTextOk = true,
+                        clipboardOk = true,
+                    )
+                } else {
+                    val insertStart = System.currentTimeMillis()
+                    result = runInsertion(polishResult.text)
+                    insertMs = System.currentTimeMillis() - insertStart
+                }
                 applyResult(result)
             } catch (t: Throwable) {
                 OpenFlowLog.e(OpenFlowLog.Tag.FGS, "commit_failed", t)
@@ -239,6 +268,10 @@ class RecordingForegroundService : Service() {
 
     private fun handleCancel() {
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "cancel_entered", mapOf("capturing" to capturing))
+        // Signal any in-flight streaming polish to abort. The native sample
+        // loop checks this on the next token callback and breaks; whatever
+        // has already been written to the EditText is kept per design.
+        cancelStreamingFlag = true
         rmsJob?.cancel()
         warmupJob?.cancel()
         if (capturing) {
@@ -285,6 +318,93 @@ class RecordingForegroundService : Service() {
         }
         return whisperEngine ?: WhisperEngine(modelStore.pathFor(model).absolutePath)
             .also { whisperEngine = it }
+    }
+
+    /**
+     * Phase 4 streaming insert. Snapshots the focused editable, starts a
+     * `polishStreaming` JNI call, and pipes each cleaned delta into the field
+     * via a Main-dispatcher writer coroutine that debounces by 80 ms / 4 chars
+     * to avoid IME flicker.
+     *
+     * Returns the [PolishResult] when streaming succeeded (text is already
+     * in the field). Returns null if the caller should fall back to the batch
+     * polish+insert path — happens when there's no focused editable, the LLM
+     * model isn't ready, the streaming call failed mid-flight, or no a11y
+     * write ever succeeded (so the field can't be assumed to hold the text).
+     *
+     * Cancel semantics: if [cancelStreamingFlag] is set mid-stream, the next
+     * token callback returns false → native sample loop breaks → whatever was
+     * already written to the field is kept (see rules.md Phase 4 decision).
+     */
+    private suspend fun tryStreamingPolishAndInsert(
+        rawText: String,
+        llmModelId: String,
+    ): PolishResult? {
+        val s = settingsStore.current()
+        val engine = ensurePolishEngine(s, llmModelId) ?: return null
+        val node = FlowAccessibilityService.instance?.currentEditableNode() ?: run {
+            OpenFlowLog.d(OpenFlowLog.Tag.LLM, "stream_no_editable_node_fallback")
+            return null
+        }
+        runCatching { node.refresh() }
+        val handle = TextInserter.startStreaming(node)
+
+        val accum = StringBuilder()
+        val accumLock = Any()
+        val tick = Channel<Unit>(Channel.CONFLATED)
+        var anyWriteOk = false
+
+        val writerJob = scope.launch(Dispatchers.Default) {
+            var lastFlushedLen = 0
+            var lastFlushMs = 0L
+
+            fun maybeFlush(force: Boolean) {
+                val snap = synchronized(accumLock) { accum.toString() }
+                val now = System.currentTimeMillis()
+                val grew = snap.length - lastFlushedLen
+                if (grew <= 0) return
+                if (!force && grew < DEBOUNCE_CHARS && now - lastFlushMs < DEBOUNCE_MS) return
+                val ok = runCatching { TextInserter.updateStreaming(handle, snap) }
+                    .getOrElse { false }
+                if (ok) {
+                    anyWriteOk = true
+                    lastFlushedLen = snap.length
+                    lastFlushMs = now
+                }
+            }
+
+            try {
+                for (signal in tick) maybeFlush(force = false)
+                maybeFlush(force = true)
+            } catch (_: Throwable) {
+                // Channel closed or write threw — swallow; finalize block below
+                // handles the corrective write.
+            }
+        }
+
+        val polishResult = engine.polishStreaming(rawText) { delta ->
+            if (cancelStreamingFlag) return@polishStreaming false
+            synchronized(accumLock) { accum.append(delta) }
+            tick.trySend(Unit)
+            true
+        }
+
+        tick.close()
+        writerJob.join()
+
+        // Final corrective write if surrounding-quote stripping / final trim
+        // changed the canonical text vs what we streamed.
+        if (anyWriteOk && polishResult.text != accum.toString()) {
+            val ok = runCatching { TextInserter.updateStreaming(handle, polishResult.text) }
+                .getOrElse { false }
+            OpenFlowLog.d(
+                OpenFlowLog.Tag.LLM,
+                "stream_final_correction",
+                mapOf("ok" to ok, "finalLen" to polishResult.text.length),
+            )
+        }
+
+        return if (anyWriteOk) polishResult else null
     }
 
     private fun ensurePolishEngine(s: FlowSettings, llmModelId: String? = null): PolishEngine? {
@@ -441,5 +561,12 @@ class RecordingForegroundService : Service() {
         private const val TAG = "FlowFGS"
         private const val CHANNEL_ID = "openflow_recording"
         private const val NOTIF_ID = 9601
+
+        // Streaming insert debounce — small enough that the user perceives
+        // continuous reveal, large enough that we don't hammer a11y with
+        // ACTION_SET_TEXT for every single token (which causes IME flicker
+        // on some keyboards and a noticeable cursor jitter).
+        private const val DEBOUNCE_CHARS = 4
+        private const val DEBOUNCE_MS = 80L
     }
 }

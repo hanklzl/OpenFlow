@@ -19,6 +19,7 @@ data class FlowSettings(
     val waveformEnabled: Boolean,
     val editBeforeInsertEnabled: Boolean,
     val polishWarmupEnabled: Boolean,
+    val polishStreamingEnabled: Boolean,
     val whisperModelId: String,
     val llmModelId: String,
     val mirrorBase: String,
@@ -35,6 +36,7 @@ class SettingsStore(private val context: Context) {
     suspend fun setWaveform(enabled: Boolean) = update { it[K_WAVEFORM] = enabled }
     suspend fun setEditBeforeInsert(enabled: Boolean) = update { it[K_EDIT_BEFORE] = enabled }
     suspend fun setPolishWarmupEnabled(enabled: Boolean) = update { it[K_POLISH_WARMUP] = enabled }
+    suspend fun setPolishStreamingEnabled(enabled: Boolean) = update { it[K_POLISH_STREAMING] = enabled }
     suspend fun setWhisperModelId(id: String) = update { it[K_WHISPER_ID] = id }
     suspend fun setLlmModelId(id: String) = update { it[K_LLM_ID] = id }
     suspend fun setMirrorBase(url: String) = update { it[K_MIRROR_BASE] = url }
@@ -49,6 +51,7 @@ class SettingsStore(private val context: Context) {
         waveformEnabled = this[K_WAVEFORM] ?: true,
         editBeforeInsertEnabled = this[K_EDIT_BEFORE] ?: false,
         polishWarmupEnabled = this[K_POLISH_WARMUP] ?: true,
+        polishStreamingEnabled = this[K_POLISH_STREAMING] ?: true,
         whisperModelId = this[K_WHISPER_ID] ?: ModelCatalog.whisperDefault.id,
         llmModelId = this[K_LLM_ID] ?: ModelCatalog.llmDefault.id,
         mirrorBase = this[K_MIRROR_BASE] ?: DEFAULT_MIRROR,
@@ -63,6 +66,7 @@ class SettingsStore(private val context: Context) {
         private val K_WAVEFORM = booleanPreferencesKey("waveform")
         private val K_EDIT_BEFORE = booleanPreferencesKey("edit_before_insert")
         private val K_POLISH_WARMUP = booleanPreferencesKey("polish_warmup_enabled")
+        private val K_POLISH_STREAMING = booleanPreferencesKey("polish_streaming_enabled")
         private val K_WHISPER_ID = stringPreferencesKey("whisper_model_id")
         private val K_LLM_ID = stringPreferencesKey("llm_model_id")
         private val K_MIRROR_BASE = stringPreferencesKey("mirror_base")

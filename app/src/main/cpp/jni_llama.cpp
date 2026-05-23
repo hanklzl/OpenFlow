@@ -204,6 +204,131 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
     return env->NewStringUTF(combined.c_str());
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativeGenerateStreaming(
+        JNIEnv *env, jobject /*thiz*/,
+        jlong handle, jstring jPrompt,
+        jint maxNewTokens, jfloat temperature, jfloat topP,
+        jobject sink) {
+    auto *h = reinterpret_cast<LlamaHolder *>(handle);
+    if (h == nullptr || h->ctx == nullptr) return env->NewStringUTF("");
+    if (sink == nullptr) return env->NewStringUTF("");
+
+    jclass sinkCls = env->GetObjectClass(sink);
+    jmethodID onTokenMid = env->GetMethodID(sinkCls, "onToken", "(Ljava/lang/String;)Z");
+    env->DeleteLocalRef(sinkCls);
+    if (onTokenMid == nullptr) {
+        LOGE("TokenSink.onToken(Ljava/lang/String;)Z not found");
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return env->NewStringUTF("");
+    }
+
+    const long long totalStartMs = nowMs();
+    const char *cPrompt = env->GetStringUTFChars(jPrompt, nullptr);
+    std::string prompt(cPrompt);
+    env->ReleaseStringUTFChars(jPrompt, cPrompt);
+    LOGI("nativeGenerateStreaming start promptBytes=%zu maxNewTokens=%d temp=%.2f topP=%.2f",
+         prompt.size(), maxNewTokens, temperature, topP);
+
+    auto tokens = tokenize(h->vocab, prompt, /*addSpecial=*/true, /*parseSpecial=*/true);
+    if (tokens.empty()) {
+        LOGE("tokenize returned empty");
+        return env->NewStringUTF("");
+    }
+
+    llama_memory_t mem = llama_get_memory(h->ctx);
+    llama_memory_clear(mem, /*data=*/true);
+
+    const int batchSize = 64;
+    int pos = 0;
+    int chunkCount = 0;
+    const long long promptDecodeStartMs = nowMs();
+    while (pos < (int)tokens.size()) {
+        const int chunk = std::min(batchSize, (int)tokens.size() - pos);
+        llama_batch batch = llama_batch_get_one(&tokens[pos], chunk);
+        if (llama_decode(h->ctx, batch) != 0) {
+            LOGE("decode failed at pos=%d", pos);
+            return env->NewStringUTF("");
+        }
+        pos += chunk;
+        ++chunkCount;
+    }
+    const long long prefillMs = nowMs() - promptDecodeStartMs;
+    LOGI("nativeGenerateStreaming prefill_done tokens=%zu chunks=%d durMs=%lld",
+         tokens.size(), chunkCount, prefillMs);
+
+    auto sparams = llama_sampler_chain_default_params();
+    llama_sampler *sampler = llama_sampler_chain_init(sparams);
+    if (topP < 1.0f) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_top_p(topP, 1));
+    }
+    if (temperature > 0.0f) {
+        llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
+        llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
+    } else {
+        llama_sampler_chain_add(sampler, llama_sampler_init_greedy());
+    }
+
+    std::string out;
+    out.reserve(static_cast<size_t>(maxNewTokens) * 4);
+
+    const long long generateStartMs = nowMs();
+    long long firstTokenMs = -1;
+    int generatedTokens = 0;
+    bool eogReached = false;
+    bool cancelled = false;
+    for (int i = 0; i < maxNewTokens; ++i) {
+        llama_token id = llama_sampler_sample(sampler, h->ctx, -1);
+        if (llama_vocab_is_eog(h->vocab, id)) {
+            eogReached = true;
+            break;
+        }
+
+        if (firstTokenMs < 0) firstTokenMs = nowMs() - generateStartMs;
+        std::string piece = tokenToString(h->vocab, id);
+        out += piece;
+        ++generatedTokens;
+
+        jstring jPiece = env->NewStringUTF(piece.c_str());
+        jboolean keepGoing = env->CallBooleanMethod(sink, onTokenMid, jPiece);
+        env->DeleteLocalRef(jPiece);
+        if (env->ExceptionCheck()) {
+            LOGE("TokenSink.onToken threw");
+            env->ExceptionDescribe();
+            env->ExceptionClear();
+            cancelled = true;
+            break;
+        }
+        if (!keepGoing) {
+            cancelled = true;
+            break;
+        }
+
+        llama_batch one = llama_batch_get_one(&id, 1);
+        if (llama_decode(h->ctx, one) != 0) {
+            LOGE("decode failed during generation step=%d", i);
+            break;
+        }
+    }
+    const long long decodeMs = nowMs() - generateStartMs;
+    LOGI("nativeGenerateStreaming done outBytes=%zu tokens=%d eog=%d cancelled=%d "
+         "prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
+         out.size(), generatedTokens, eogReached ? 1 : 0, cancelled ? 1 : 0,
+         prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
+
+    llama_sampler_free(sampler);
+
+    char header[160];
+    int headerLen = snprintf(header, sizeof(header),
+                             "\x01prefill_ms=%lld,decode_ms=%lld,first_token_ms=%lld\x01",
+                             prefillMs, decodeMs, firstTokenMs);
+    std::string combined;
+    combined.reserve(static_cast<size_t>(headerLen) + out.size());
+    combined.append(header, static_cast<size_t>(headerLen));
+    combined.append(out);
+    return env->NewStringUTF(combined.c_str());
+}
+
 JNIEXPORT void JNICALL
 Java_com_hank_flow_open_llm_LlamaJni_nativeFree(JNIEnv * /*env*/, jobject /*thiz*/,
                                                 jlong handle) {

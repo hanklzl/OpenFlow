@@ -12,5 +12,18 @@ object LlamaJni {
 
     external fun nativeInit(modelPath: String, ctxSize: Int, nGpuLayers: Int): Long
     external fun nativeGenerate(handle: Long, prompt: String, maxNewTokens: Int, temperature: Float, topP: Float): String
+    external fun nativeGenerateStreaming(
+        handle: Long,
+        prompt: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: TokenSink,
+    ): String
     external fun nativeFree(handle: Long)
+
+    fun interface TokenSink {
+        /** Returning false aborts generation; the partial output is still flushed. */
+        fun onToken(piece: String): Boolean
+    }
 }

@@ -44,6 +44,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             waveformEnabled = true,
             editBeforeInsertEnabled = false,
             polishWarmupEnabled = true,
+            polishStreamingEnabled = true,
             whisperModelId = "",
             llmModelId = "",
             mirrorBase = SettingsStore.DEFAULT_MIRROR,
@@ -89,6 +90,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             description = "录音开始就提前加载 LLM，commit 后润色冷启动接近 0；关闭可降低低端机内存峰值",
             checked = settings.polishWarmupEnabled,
             onChange = { scope.launch { store.setPolishWarmupEnabled(it) } },
+        )
+        Toggle(
+            label = "流式润色写入",
+            description = "LLM 出第一个字就开始写入输入框，无需等整段润色完成；个别 IME 可能闪烁可关闭",
+            checked = settings.polishStreamingEnabled,
+            onChange = { scope.launch { store.setPolishStreamingEnabled(it) } },
         )
 
         Spacer(Modifier.height(20.dp))
