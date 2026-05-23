@@ -193,7 +193,10 @@ class DebugModelInstallReceiver : BroadcastReceiver() {
 
 实现细节：
 
-- 依赖 `OpenFlowLog.Tag.MODEL`。实现期先 verify 该 Tag 是否存在；不存在则在同 commit 中追加。
+- **依赖 `OpenFlowLog.Tag.MODEL`，当前 enum 不存在**（实际为 `{A11Y, OVERLAY, FGS, ASR, LLM, INSERT, AUDIO, APP}`，见 `app/src/main/java/com/hank/flow/open/log/OpenFlowLog.kt:26`）。实施期决策：
+  - **方案 A（推荐）**：在 `OpenFlowLog.Tag` enum 追加 `MODEL`。一行改动，语义清晰，未来 `ModelDownloader` / `ModelStore` 的诊断打点都能用。
+  - **方案 B**：复用 `Tag.APP`。零 enum 变动但语义混淆。
+  - 默认走 A；同 commit 提交 receiver + enum 追加。
 - 幂等：target 已存在 + size 一致 + `force=false` 跳过 copy，仅 log skip。
 - 完成后删除 `/data/local/tmp/<file>` 避免设备空间堆积（受限存储下 500 MB 双拷贝代价高）。
 - 失败 log + `OpenFlowLog.flush()` 立即落地到 Logan，便于 smoke 失败时 adb 拉取证据。
@@ -383,7 +386,7 @@ MUST 段从「全链路一次成功」改为「两种走法等效」。
 
 - 不覆盖 UI 全链路（`ACTION_SET_TEXT` 写入第三方 EditText 等纯 UI 路径），手动版仍要保留
 - 模型版本升级时需手动重下到 `~/.openflow-smoke-models/`（或加 `--force-reinstall`）
-- `MODEL` Tag 可能要在 `OpenFlowLog` 加（实现期 verify）
+- LLM 默认 ID 在 spec 中写作 `qwen3-0.6b-instruct-q4_k_m`，实施期需 verify 与 `ModelCatalog.llmDefault.id` 是否一致；不一致则更新 spec + smoke-test.sh 默认值
 - 接口稳定后可平移 Firebase Test Lab / BrowserStack，本期不做
 
 ## 关联
