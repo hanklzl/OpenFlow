@@ -11,8 +11,11 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.hank.flow.open.OpenFlowApp
 import com.hank.flow.open.asr.WhisperEngine
 import com.hank.flow.open.audio.AudioRecorder
+import com.hank.flow.open.history.HistoryRecord
+import com.hank.flow.open.history.HistoryStore
 import com.hank.flow.open.insertion.PipelineResult
 import com.hank.flow.open.insertion.StreamingHandle
 import com.hank.flow.open.insertion.TextInserter
@@ -59,6 +62,7 @@ class RecordingForegroundService : Service() {
 
     private val settingsStore by lazy { SettingsStore(applicationContext) }
     private val modelStore by lazy { ModelStore(applicationContext) }
+    private val historyStore: HistoryStore get() = OpenFlowApp.instance.historyStore
 
     private var whisperEngine: WhisperEngine? = null
     private var polishEngine: PolishEngine? = null
@@ -194,6 +198,7 @@ class RecordingForegroundService : Service() {
 
                 val polishWanted = settings.polishEnabled && asrResult.text.isNotBlank()
                 var streamingTookOver = false
+                val polishStartWall = System.currentTimeMillis()
                 if (polishWanted) pushState(BallState.Polishing)
 
                 polishResult = if (polishWanted) {
@@ -209,6 +214,8 @@ class RecordingForegroundService : Service() {
                 } else {
                     PolishResult(asrResult.text)
                 }
+                val polishDurMsWall: Long? =
+                    if (polishWanted) System.currentTimeMillis() - polishStartWall else null
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.LLM,
                     "polish_done",
@@ -221,6 +228,7 @@ class RecordingForegroundService : Service() {
                         "prefillMs" to polishResult.prefillMs,
                         "decodeMs" to polishResult.decodeMs,
                         "firstTokenMs" to polishResult.firstTokenMs,
+                        "wallMs" to (polishDurMsWall ?: 0L),
                     ),
                 )
 
@@ -241,6 +249,16 @@ class RecordingForegroundService : Service() {
                     insertMs = System.currentTimeMillis() - insertStart
                 }
                 applyResult(result)
+                recordHistory(
+                    pcm = pcm,
+                    raw = asrResult.text,
+                    finalText = polishResult.text,
+                    polishAttempted = polishWanted,
+                    asrModelId = settings.whisperModelId,
+                    llmModelId = settings.llmModelId,
+                    asrDurMs = asrResult.nativeMs.coerceAtLeast(0L),
+                    polishDurMs = polishDurMsWall,
+                )
             } catch (t: Throwable) {
                 OpenFlowLog.e(OpenFlowLog.Tag.FGS, "commit_failed", t)
                 applyResult(PipelineResult.Failed("处理失败:${t.javaClass.simpleName}"))
@@ -263,6 +281,43 @@ class RecordingForegroundService : Service() {
                 OpenFlowLog.flush()
                 stopSelfSafely()
             }
+        }
+    }
+
+    private suspend fun recordHistory(
+        pcm: ShortArray,
+        raw: String,
+        finalText: String,
+        polishAttempted: Boolean,
+        asrModelId: String,
+        llmModelId: String,
+        asrDurMs: Long,
+        polishDurMs: Long?,
+    ) {
+        if (pcm.isEmpty() || raw.isBlank()) return
+        val polished = if (polishAttempted && finalText != raw) finalText else null
+        val effectiveLlmId = if (polishAttempted) llmModelId else null
+        val record = HistoryRecord(
+            id = HistoryStore.newId(),
+            createdAtMs = System.currentTimeMillis(),
+            sampleRate = 16_000,
+            sampleCount = pcm.size,
+            rawText = raw,
+            polishedText = polished,
+            asrModelId = asrModelId,
+            llmModelId = effectiveLlmId,
+            asrDurationMs = asrDurMs,
+            polishDurationMs = if (polishAttempted) polishDurMs else null,
+        )
+        try {
+            historyStore.append(record, pcm)
+            OpenFlowLog.d(
+                OpenFlowLog.Tag.FGS,
+                "history_appended",
+                mapOf("id" to record.id, "samples" to pcm.size),
+            )
+        } catch (t: Throwable) {
+            OpenFlowLog.e(OpenFlowLog.Tag.FGS, "history_append_failed", t)
         }
     }
 
