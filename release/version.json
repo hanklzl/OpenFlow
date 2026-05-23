@@ -1,39 +1,39 @@
 {
   "schemaVersion": 2,
-  "version": "0.1.1",
-  "versionCode": 101,
-  "releasedAt": "2026-05-23T13:17:50Z",
-  "releaseNotesUrl": "https://github.com/hanklzl/OpenFlow/releases/tag/v0.1.1",
+  "version": "0.1.2",
+  "versionCode": 102,
+  "releasedAt": "2026-05-23T17:33:52Z",
+  "releaseNotesUrl": "https://github.com/hanklzl/OpenFlow/releases/tag/v0.1.2",
   "changeLog": [
-    "feat(asr): 增加 Whisper 词典提示 (17614f3)",
-    "feat(perf): Phase 6 — Vulkan 后端可行性评估 + 试验性 CMake 钩子 (2cb4469)",
-    "feat(perf): Phase 5 — KV prefix 缓存 + pipeline/rules.md 补取消语义与失效条件 (a0efc1e)",
-    "feat(perf): Phase 4 — 流式润色 + 首 token 即写入输入框 (3c03dbc)",
-    "feat(perf): Phase 2/3 — Qwen3 极速档命名 + 录音中并行预热引擎 (a7b9638)",
-    "feat(perf): Phase 1 — whisper 参数收紧 + llama 批量增大 + arm64 dotprod (ec021c4)",
-    "feat(perf): Phase 0 — 引入端到端 pipeline_summary 与 polish metric piggyback (9f2e764)",
-    "feat(history): 新增语音输入历史 Tab，可查看 / 回放 / 复制 / 清理 (494ccdc)"
+    "feat(native): 接入实验性 GPU 推理后端 (dfef2ee)",
+    "feat(release): preflight 末尾加 adb 设备检测，推荐跑 smoke-test.sh (f6aac74)",
+    "feat(release): scripts/release/smoke-test.sh 自动化真机冒烟驱动 (ca8c578)",
+    "feat(debug): main manifest 用 signature permission 暴露 debug receiver/service，删 debug-only 副本 (bf63745)",
+    "feat(debug): DebugModelInstallReceiver 委托 Installer 处理 adb push 模型 (2fd1e3f)",
+    "feat(debug): 引入 DebugModelInstaller 纯函数 + InstallResult sealed (fe2a46d)",
+    "docs(memory): add MEM-BUILD-0006 .claude/skills 全是 plain file 不是文档约定的 symlink (604b593)",
+    "docs(memory): add MEM-BUILD-0005 smoke 用 ModelCatalog 最轻档不跟随 default (537c7ba)"
   ],
   "variants": {
     "arm64-v8a": {
       "download": [
-        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.1/OpenFlow-v0.1.1-arm64-v8a.apk",
-        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.1/release/OpenFlow-v0.1.1-arm64-v8a.apk"
+        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.2/OpenFlow-v0.1.2-arm64-v8a.apk",
+        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.2/release/OpenFlow-v0.1.2-arm64-v8a.apk"
       ],
-      "size": 8416836,
-      "sha256": "0a750077fe209296b723b689d2c7b589916e4c5f5e8c150f56748a6037d25878"
+      "size": 8459828,
+      "sha256": "1a1835354e255bdf749f323ea6969e88d8b8a09c32ab8279bc8162b775b1f769"
     },
     "x86_64": {
       "download": [
-        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.1/OpenFlow-v0.1.1-x86_64.apk",
-        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.1/release/OpenFlow-v0.1.1-x86_64.apk"
+        "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.2/OpenFlow-v0.1.2-x86_64.apk",
+        "https://cdn.jsdelivr.net/gh/hanklzl/OpenFlow@v0.1.2/release/OpenFlow-v0.1.2-x86_64.apk"
       ],
-      "size": 8745093,
-      "sha256": "4e80504af01b677dc08d2d306a9ede71afba4e8cde62ad62125c696d5e1d58a2"
+      "size": 8788869,
+      "sha256": "65899e73717feed73c11c6d96f0799743308368d998290edc814a154ce0a8165"
     }
   },
   "mapping": {
-    "url": "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.1/mapping-v0.1.1.zip",
-    "sha256": "9961062be541075cdf74c06e86102a77d3101985696b3bc52ff7ab1f935f34a2"
+    "url": "https://github.com/hanklzl/OpenFlow/releases/download/v0.1.2/mapping-v0.1.2.zip",
+    "sha256": "0435e27e547dd42ed1bfaa4399c570ca7ee653f859516aeb592c27db70ccd86f"
   }
 }
