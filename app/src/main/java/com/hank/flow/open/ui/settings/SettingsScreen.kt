@@ -43,6 +43,7 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             swipeUpCancelEnabled = true,
             waveformEnabled = true,
             editBeforeInsertEnabled = false,
+            polishWarmupEnabled = true,
             whisperModelId = "",
             llmModelId = "",
             mirrorBase = SettingsStore.DEFAULT_MIRROR,
@@ -82,6 +83,12 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             description = "识别完成后弹出可编辑卡片，确认再写入",
             checked = settings.editBeforeInsertEnabled,
             onChange = { scope.launch { store.setEditBeforeInsert(it) } },
+        )
+        Toggle(
+            label = "录音时预热润色模型",
+            description = "录音开始就提前加载 LLM，commit 后润色冷启动接近 0；关闭可降低低端机内存峰值",
+            checked = settings.polishWarmupEnabled,
+            onChange = { scope.launch { store.setPolishWarmupEnabled(it) } },
         )
 
         Spacer(Modifier.height(20.dp))

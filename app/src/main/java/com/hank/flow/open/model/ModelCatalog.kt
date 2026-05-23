@@ -56,7 +56,7 @@ object ModelCatalog {
     val llmTinyNewer = ModelEntry(
         id = "qwen3-0.6b-q4_k_m",
         kind = ModelKind.Llm,
-        displayName = "Qwen3 0.6B (Q4_K_M) — 轻量",
+        displayName = "Qwen3 0.6B (Q4_K_M) — 极速档，速度优先",
         sizeBytes = 396_705_472L,
         sha256 = "",
         hfPath = "unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf",

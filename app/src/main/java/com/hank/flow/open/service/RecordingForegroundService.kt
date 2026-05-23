@@ -21,7 +21,9 @@ import com.hank.flow.open.llm.PolishEngine
 import com.hank.flow.open.llm.PolishResult
 import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
+import com.hank.flow.open.model.ModelEntry
 import com.hank.flow.open.model.ModelStore
+import com.hank.flow.open.settings.FlowSettings
 import com.hank.flow.open.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +51,7 @@ class RecordingForegroundService : Service() {
     private val recorder = AudioRecorder()
     private var captureJob: Job? = null
     private var rmsJob: Job? = null
+    private var warmupJob: Job? = null
     private var capturing = false
 
     private val settingsStore by lazy { SettingsStore(applicationContext) }
@@ -91,7 +94,44 @@ class RecordingForegroundService : Service() {
             return
         }
         startRmsForwarding()
+        startEngineWarmup()
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "recording_started")
+    }
+
+    /**
+     * Phase 3: while the user is still holding the mic button, race ASR and
+     * polish model loads (nativeInit can take 0.5–2 s each) so they're hot
+     * when handleCommit fires. Cancelled in handleCancel; on commit we just
+     * call ensureLoaded again — it's a no-op once the handle is set.
+     */
+    private fun startEngineWarmup() {
+        warmupJob?.cancel()
+        warmupJob = scope.launch {
+            runCatching {
+                val tWarmup = System.currentTimeMillis()
+                val s = settingsStore.current()
+                val tasks = mutableListOf<Job>()
+                tasks += launch {
+                    ensureWhisperEngine(s)?.ensureLoaded()
+                }
+                if (s.polishEnabled && s.polishWarmupEnabled) {
+                    tasks += launch {
+                        ensurePolishEngine(s)?.ensureLoaded()
+                    }
+                }
+                tasks.forEach { it.join() }
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.FGS,
+                    "warmup_done",
+                    mapOf(
+                        "warmupMs" to (System.currentTimeMillis() - tWarmup),
+                        "polishWarmup" to (s.polishEnabled && s.polishWarmupEnabled),
+                    ),
+                )
+            }.onFailure {
+                OpenFlowLog.e(OpenFlowLog.Tag.FGS, "warmup_failed", it)
+            }
+        }
     }
 
     private fun startRmsForwarding() {
@@ -200,6 +240,7 @@ class RecordingForegroundService : Service() {
     private fun handleCancel() {
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "cancel_entered", mapOf("capturing" to capturing))
         rmsJob?.cancel()
+        warmupJob?.cancel()
         if (capturing) {
             recorder.stop()
             capturing = false
@@ -212,8 +253,26 @@ class RecordingForegroundService : Service() {
             OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_empty_pcm")
             return WhisperResult("")
         }
-        val settings = settingsStore.current()
-        val model = ModelCatalog.byId(settings.whisperModelId) ?: ModelCatalog.whisperDefault
+        val engine = ensureWhisperEngine(settingsStore.current())
+            ?: return WhisperResult("")
+        return engine.transcribe(pcm, language = "auto")
+    }
+
+    private suspend fun polish(text: String, llmModelId: String): PolishResult {
+        if (text.isBlank()) return PolishResult(text)
+        val engine = ensurePolishEngine(settingsStore.current(), llmModelId)
+            ?: return PolishResult(text)
+        return engine.polish(text)
+    }
+
+    private fun resolveWhisperModel(s: FlowSettings): ModelEntry =
+        ModelCatalog.byId(s.whisperModelId) ?: ModelCatalog.whisperDefault
+
+    private fun resolveLlmModel(s: FlowSettings, llmModelId: String? = null): ModelEntry =
+        ModelCatalog.byId(llmModelId ?: s.llmModelId) ?: ModelCatalog.llmDefault
+
+    private fun ensureWhisperEngine(s: FlowSettings): WhisperEngine? {
+        val model = resolveWhisperModel(s)
         val ready = modelStore.isReady(model)
         OpenFlowLog.d(
             OpenFlowLog.Tag.ASR,
@@ -222,16 +281,14 @@ class RecordingForegroundService : Service() {
         )
         if (!ready) {
             Log.w(TAG, "Whisper model not ready: ${model.id}")
-            return WhisperResult("")
+            return null
         }
-        val engine = whisperEngine ?: WhisperEngine(modelStore.pathFor(model).absolutePath)
+        return whisperEngine ?: WhisperEngine(modelStore.pathFor(model).absolutePath)
             .also { whisperEngine = it }
-        return engine.transcribe(pcm, language = "auto")
     }
 
-    private suspend fun polish(text: String, llmModelId: String): PolishResult {
-        if (text.isBlank()) return PolishResult(text)
-        val model = ModelCatalog.byId(llmModelId) ?: ModelCatalog.llmDefault
+    private fun ensurePolishEngine(s: FlowSettings, llmModelId: String? = null): PolishEngine? {
+        val model = resolveLlmModel(s, llmModelId)
         val ready = modelStore.isReady(model)
         OpenFlowLog.d(
             OpenFlowLog.Tag.LLM,
@@ -240,13 +297,12 @@ class RecordingForegroundService : Service() {
         )
         if (!ready) {
             Log.w(TAG, "LLM model not ready: ${model.id}")
-            return PolishResult(text)
+            return null
         }
-        val engine = polishEngine ?: PolishEngine(
+        return polishEngine ?: PolishEngine(
             modelPath = modelStore.pathFor(model).absolutePath,
             isQwen3 = model.id.startsWith("qwen3-"),
         ).also { polishEngine = it }
-        return engine.polish(text)
     }
 
     private fun runInsertion(text: String): PipelineResult {
