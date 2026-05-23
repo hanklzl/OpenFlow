@@ -29,7 +29,7 @@
 4. **禁止启用 `LLAMA_CURL` / `GGML_CURL`**：会拉 curl 静态库进 APK，体积 +20MB+。
 5. **禁止启用 `WHISPER_BUILD_*` / `LLAMA_BUILD_EXAMPLES`**：拉一堆没用的 binary 进编译。
 6. **禁止在 Kotlin 侧做 PCM 归一化**：性能差且容易出 endianness bug。
-7. **禁止给 `nativeInit(modelPath, ctxSize, nGpuLayers)` 传 `nGpuLayers > 0`**：Android 上 llama.cpp 没靠谱 GPU 后端。
+7. **默认 `nativeInit(modelPath, ctxSize, nGpuLayers)` 的 `nGpuLayers` 必须为 0**：默认 APK 没编 ggml-vulkan（`OPENFLOW_ENABLE_VULKAN=OFF`），传 >0 会被忽略最多到 silent CPU fallback；启用了 Vulkan 构建后才允许在试验通道里传 >0，并必须实装 CPU 回退路径。详见 [gpu-inference-feasibility.md](./gpu-inference-feasibility.md)。
 8. **禁止改 `externalNativeBuild` 为 `ndkBuild`**：AGP 对 cmake 集成最稳定。
 9. **禁止省略 `llama_memory_clear`**：上一次润色的 KV 会污染本次，表现为偶发胡言乱语。
 
@@ -52,3 +52,4 @@
 - `app/src/main/cpp/third_party/llama.cpp/` (submodule)
 - `app/build.gradle.kts`（`externalNativeBuild` 与 `ndk` 块）
 - `.gitmodules`
+- `docs/dev-harness/native/gpu-inference-feasibility.md` — Vulkan / NPU 路径调研

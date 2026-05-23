@@ -26,6 +26,52 @@ if (CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
     set(GGML_CPU_ARM_ARCH "armv8.2-a+dotprod" CACHE STRING "" FORCE)
 endif()
 
+# Phase 6 (experimental): Vulkan GPU backend. Default OFF.
+#
+# See docs/dev-harness/research/gpu-inference-feasibility.md for the full
+# evaluation. TL;DR: technically possible but requires the LunarG Vulkan SDK
+# on the host (provides SPIRV-Headers + the Vulkan CMake config that
+# llama.cpp's ggml-vulkan does `find_package(Vulkan COMPONENTS glslc REQUIRED)`
+# + `find_package(SPIRV-Headers REQUIRED)` against). NDK's bundled glslc alone
+# is NOT enough. Also adds 5-10 min/ABI build time + ~5-8 MB APK + needs
+# runtime CPU-fallback path that's not yet implemented.
+#
+# To experiment locally:
+#   1. Install LunarG Vulkan SDK (https://vulkan.lunarg.com)
+#   2. source the SDK setup script (or set VULKAN_SDK / CMAKE_PREFIX_PATH)
+#   3. ./gradlew :app:assembleDebug -POpenflowEnableVulkan=true
+#
+# We auto-add NDK r25+'s bundled glslc to PATH so vulkan-shaders-gen finds it
+# even if the SDK ships a different version. SPIRV-Headers and the Vulkan
+# CMake config must come from the SDK.
+option(OPENFLOW_ENABLE_VULKAN "Compile in ggml-vulkan backend (experimental, needs LunarG SDK)" OFF)
+if (OPENFLOW_ENABLE_VULKAN)
+    if (DEFINED CMAKE_ANDROID_NDK)
+        set(_openflow_ndk_root "${CMAKE_ANDROID_NDK}")
+    elseif (DEFINED ANDROID_NDK)
+        set(_openflow_ndk_root "${ANDROID_NDK}")
+    elseif (DEFINED ENV{ANDROID_NDK_HOME})
+        set(_openflow_ndk_root "$ENV{ANDROID_NDK_HOME}")
+    endif()
+    if (DEFINED ANDROID_HOST_TAG)
+        set(_openflow_ndk_host_tag "${ANDROID_HOST_TAG}")
+    elseif (APPLE)
+        set(_openflow_ndk_host_tag "darwin-x86_64")
+    elseif (UNIX)
+        set(_openflow_ndk_host_tag "linux-x86_64")
+    elseif (WIN32)
+        set(_openflow_ndk_host_tag "windows-x86_64")
+    endif()
+    set(_openflow_glslc "${_openflow_ndk_root}/shader-tools/${_openflow_ndk_host_tag}/glslc")
+    if (EXISTS "${_openflow_glslc}")
+        get_filename_component(_openflow_glslc_dir "${_openflow_glslc}" DIRECTORY)
+        set(ENV{PATH} "${_openflow_glslc_dir}:$ENV{PATH}")
+        message(STATUS "OpenFlow: prepending NDK shader-tools to PATH (${_openflow_glslc_dir})")
+    endif()
+    set(GGML_VULKAN ON CACHE BOOL "" FORCE)
+    message(STATUS "OpenFlow: Vulkan backend ENABLED (requires LunarG Vulkan SDK on host for SPIRV-Headers)")
+endif()
+
 set(LLAMA_BUILD_TESTS              OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES           OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS              OFF CACHE BOOL "" FORCE)

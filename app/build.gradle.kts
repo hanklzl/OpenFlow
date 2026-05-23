@@ -57,6 +57,13 @@ android {
                     "-DANDROID_STL=c++_shared",
                     "-DANDROID_ARM_NEON=ON",
                 )
+                // Phase 6 experimental Vulkan: enable with
+                //   ./gradlew assembleDebug -POpenflowEnableVulkan=true
+                // First clean build then takes 5-10 extra minutes per ABI to
+                // compile ggml's 181 GLSL shaders via the NDK-bundled glslc.
+                if (project.findProperty("OpenflowEnableVulkan") == "true") {
+                    arguments += "-DOPENFLOW_ENABLE_VULKAN=ON"
+                }
             }
         }
     }
