@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstring>
+#include <chrono>
 
 #define LOG_TAG "LlamaJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -18,6 +19,11 @@ struct LlamaHolder {
 };
 
 bool gBackendInitialized = false;
+
+long long nowMs() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count();
+}
 
 std::vector<llama_token> tokenize(const llama_vocab *vocab, const std::string &text,
                                   bool addSpecial, bool parseSpecial) {
@@ -71,7 +77,8 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
 
     llama_context_params cparams = llama_context_default_params();
     cparams.n_ctx = static_cast<uint32_t>(ctxSize);
-    cparams.n_batch = 256;
+    cparams.n_batch = 64;
+    cparams.n_ubatch = 16;
     cparams.n_threads = 4;
     cparams.n_threads_batch = 4;
 
@@ -83,7 +90,8 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
     }
 
     auto *holder = new LlamaHolder{model, ctx, llama_model_get_vocab(model)};
-    LOGI("Llama context initialized (ctx=%d)", ctxSize);
+    LOGI("Llama context initialized (ctx=%d, batch=%u, ubatch=%u, threads=%d/%d)",
+         ctxSize, cparams.n_batch, cparams.n_ubatch, cparams.n_threads, cparams.n_threads_batch);
     return reinterpret_cast<jlong>(holder);
 }
 
@@ -95,32 +103,45 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
     auto *h = reinterpret_cast<LlamaHolder *>(handle);
     if (h == nullptr || h->ctx == nullptr) return env->NewStringUTF("");
 
+    const long long totalStartMs = nowMs();
     const char *cPrompt = env->GetStringUTFChars(jPrompt, nullptr);
     std::string prompt(cPrompt);
     env->ReleaseStringUTFChars(jPrompt, cPrompt);
+    LOGI("nativeGenerate start promptBytes=%zu maxNewTokens=%d temp=%.2f topP=%.2f",
+         prompt.size(), maxNewTokens, temperature, topP);
 
+    const long long tokenizeStartMs = nowMs();
     auto tokens = tokenize(h->vocab, prompt, /*addSpecial=*/true, /*parseSpecial=*/true);
     if (tokens.empty()) {
         LOGE("tokenize returned empty");
         return env->NewStringUTF("");
     }
+    LOGI("nativeGenerate tokenized tokens=%zu durMs=%lld",
+         tokens.size(), nowMs() - tokenizeStartMs);
 
     // Fresh KV state for each call.
     llama_memory_t mem = llama_get_memory(h->ctx);
     llama_memory_clear(mem, /*data=*/true);
 
     // Feed prompt in chunks of n_batch.
-    const int batchSize = 256;
+    const int batchSize = 16;
     int pos = 0;
+    const long long promptDecodeStartMs = nowMs();
     while (pos < (int)tokens.size()) {
         const int chunk = std::min(batchSize, (int)tokens.size() - pos);
+        const long long chunkStartMs = nowMs();
+        LOGI("nativeGenerate prompt_decode_start pos=%d chunk=%d", pos, chunk);
         llama_batch batch = llama_batch_get_one(&tokens[pos], chunk);
         if (llama_decode(h->ctx, batch) != 0) {
             LOGE("decode failed at pos=%d", pos);
             return env->NewStringUTF("");
         }
         pos += chunk;
+        LOGI("nativeGenerate prompt_decode_done pos=%d durMs=%lld",
+             pos, nowMs() - chunkStartMs);
     }
+    LOGI("nativeGenerate prompt_decode_all_done durMs=%lld",
+         nowMs() - promptDecodeStartMs);
 
     // Build sampler chain.
     auto sparams = llama_sampler_chain_default_params();
@@ -138,9 +159,14 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
     std::string out;
     out.reserve(static_cast<size_t>(maxNewTokens) * 4);
 
+    const long long generateStartMs = nowMs();
     for (int i = 0; i < maxNewTokens; ++i) {
+        const long long tokenStartMs = nowMs();
         llama_token id = llama_sampler_sample(sampler, h->ctx, -1);
-        if (llama_vocab_is_eog(h->vocab, id)) break;
+        if (llama_vocab_is_eog(h->vocab, id)) {
+            LOGI("nativeGenerate eog step=%d durMs=%lld", i, nowMs() - tokenStartMs);
+            break;
+        }
 
         out += tokenToString(h->vocab, id);
 
@@ -149,7 +175,11 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
             LOGE("decode failed during generation");
             break;
         }
+        LOGI("nativeGenerate token_done step=%d durMs=%lld outBytes=%zu",
+             i + 1, nowMs() - tokenStartMs, out.size());
     }
+    LOGI("nativeGenerate done outBytes=%zu genDurMs=%lld totalDurMs=%lld",
+         out.size(), nowMs() - generateStartMs, nowMs() - totalStartMs);
 
     llama_sampler_free(sampler);
     return env->NewStringUTF(out.c_str());

@@ -18,4 +18,11 @@ class PolishPromptTest {
         val prompt = PolishPrompt.build("今天 嗯 天气不错", appendNoThink = true)
         assertTrue(prompt.contains("<|im_start|>user\n今天 嗯 天气不错\n/no_think<|im_end|>"))
     }
+
+    @Test
+    fun build_instructs_model_to_keep_primary_language() {
+        val prompt = PolishPrompt.build("今天 嗯 天气不错")
+        assertTrue(prompt.contains("保持输入文本的主要语言"))
+        assertTrue(prompt.contains("中文输入必须输出中文"))
+    }
 }

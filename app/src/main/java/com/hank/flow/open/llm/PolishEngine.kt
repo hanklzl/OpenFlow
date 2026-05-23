@@ -23,16 +23,15 @@ class PolishEngine(
         handle != 0L
     }
 
-    suspend fun polish(rawText: String): String {
+    suspend fun polish(rawText: String, maxNewTokens: Int = MAX_NEW_TOKENS): String {
         if (rawText.isBlank()) return rawText
         if (!ensureLoaded()) return rawText
         val prompt = PolishPrompt.build(rawText, appendNoThink = isQwen3)
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 runCatching {
-                    LlamaJni.nativeGenerate(handle, prompt, MAX_NEW_TOKENS, TEMPERATURE, TOP_P)
-                        .trim()
-                        .removeSurrounding("\"")
+                    LlamaJni.nativeGenerate(handle, prompt, maxNewTokens, TEMPERATURE, TOP_P)
+                        .cleanPolishOutput()
                 }.getOrElse {
                     Log.e(TAG, "polish failed", it)
                     rawText
@@ -54,5 +53,12 @@ class PolishEngine(
         private const val MAX_NEW_TOKENS = 256
         private const val TEMPERATURE = 0.3f
         private const val TOP_P = 0.9f
+        private val THINK_BLOCK = Regex("<think>.*?</think>", RegexOption.DOT_MATCHES_ALL)
+
+        internal fun String.cleanPolishOutput(): String =
+            replace(THINK_BLOCK, "")
+                .trim()
+                .removeSurrounding("\"")
+                .trim()
     }
 }
