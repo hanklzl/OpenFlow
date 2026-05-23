@@ -229,7 +229,8 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                                     ),
                                 )
                                 val whisperEngine = WhisperEngine(whisperFile.absolutePath)
-                                rawText = whisperEngine.transcribe(pcm, language = "auto")
+                                val asrResult = whisperEngine.transcribe(pcm, language = "auto")
+                                rawText = asrResult.text
                                 transcribeLatencyMs = System.currentTimeMillis() - t0
                                 transcribeRunning = false
                                 log("transcribe ${transcribeLatencyMs}ms -> '${rawText.take(60)}'")
@@ -256,7 +257,8 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                                         modelPath = store.pathFor(llmModel).absolutePath,
                                         isQwen3 = llmModel.id.startsWith("qwen3-"),
                                     )
-                                    polishedText = polishEngine.polish(rawText)
+                                    val polishOutcome = polishEngine.polish(rawText)
+                                    polishedText = polishOutcome.text
                                     polishLatencyMs = System.currentTimeMillis() - p0
                                     polishRunning = false
                                     log("polish ${polishLatencyMs}ms -> '${polishedText.take(60)}'")

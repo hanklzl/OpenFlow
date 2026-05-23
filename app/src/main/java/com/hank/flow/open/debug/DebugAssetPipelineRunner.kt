@@ -82,18 +82,20 @@ object DebugAssetPipelineRunner {
         val whisper = WhisperEngine(whisperFile.absolutePath)
         return try {
             val t0 = System.currentTimeMillis()
-            val rawText = whisper.transcribe(wav.pcm, language = request.lang)
+            val result = whisper.transcribe(wav.pcm, language = request.lang)
             val asrMs = System.currentTimeMillis() - t0
             OpenFlowLog.d(
                 OpenFlowLog.Tag.ASR,
                 "debug_asset_asr_done",
                 mapOf(
                     "latencyMs" to asrMs,
-                    "textLen" to rawText.length,
-                    "text" to rawText.take(80),
+                    "loadMs" to result.loadMs,
+                    "nativeMs" to result.nativeMs,
+                    "textLen" to result.text.length,
+                    "text" to result.text.take(80),
                 ),
             )
-            rawText
+            result.text
         } finally {
             whisper.release()
         }
@@ -138,7 +140,7 @@ object DebugAssetPipelineRunner {
         )
         try {
             val p0 = System.currentTimeMillis()
-            val polishedText = request.maxTokens?.let {
+            val polished = request.maxTokens?.let {
                 polish.polish(rawText, maxNewTokens = it)
             } ?: polish.polish(rawText)
             val polishMs = System.currentTimeMillis() - p0
@@ -147,15 +149,19 @@ object DebugAssetPipelineRunner {
                 "debug_asset_polish_done",
                 mapOf(
                     "latencyMs" to polishMs,
+                    "loadMs" to polished.loadMs,
+                    "prefillMs" to polished.prefillMs,
+                    "decodeMs" to polished.decodeMs,
+                    "firstTokenMs" to polished.firstTokenMs,
                     "maxTokens" to (request.maxTokens ?: "default"),
-                    "outLen" to polishedText.length,
-                    "text" to polishedText.take(80),
+                    "outLen" to polished.text.length,
+                    "text" to polished.text.take(80),
                 ),
             )
             OpenFlowLog.d(
                 OpenFlowLog.Tag.ASR,
                 "debug_asset_finished",
-                mapOf("polished" to true, "outLen" to polishedText.length),
+                mapOf("polished" to true, "outLen" to polished.text.length),
             )
         } finally {
             polish.release()

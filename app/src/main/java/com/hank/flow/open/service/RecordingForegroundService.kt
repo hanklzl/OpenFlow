@@ -16,7 +16,9 @@ import com.hank.flow.open.audio.AudioRecorder
 import com.hank.flow.open.insertion.PipelineResult
 import com.hank.flow.open.insertion.TextInserter
 import com.hank.flow.open.insertion.decideOutcome
+import com.hank.flow.open.asr.WhisperResult
 import com.hank.flow.open.llm.PolishEngine
+import com.hank.flow.open.llm.PolishResult
 import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
 import com.hank.flow.open.model.ModelStore
@@ -104,59 +106,91 @@ class RecordingForegroundService : Service() {
     }
 
     private fun handleCommit() {
+        val tCommit = System.currentTimeMillis()
         OpenFlowLog.d(OpenFlowLog.Tag.FGS, "commit_entered", mapOf("capturing" to capturing))
         if (!capturing) {
             stopSelfSafely()
             return
         }
         captureJob = scope.launch {
+            var asrResult = WhisperResult("")
+            var polishResult = PolishResult("")
+            var insertMs = -1L
+            var pcmCollectMs = -1L
             try {
+                val pcmStart = System.currentTimeMillis()
                 val pcm = recorder.stop()
+                pcmCollectMs = System.currentTimeMillis() - pcmStart
                 capturing = false
                 rmsJob?.cancel()
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.FGS,
                     "pcm_collected",
-                    mapOf("samples" to pcm.size, "durMs" to (pcm.size * 1000L / 16000L)),
+                    mapOf(
+                        "samples" to pcm.size,
+                        "audioMs" to (pcm.size * 1000L / 16000L),
+                        "collectMs" to pcmCollectMs,
+                    ),
                 )
                 pushState(BallState.Transcribing)
 
                 val settings = settingsStore.current()
-                val asrStart = System.currentTimeMillis()
                 OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_start")
-                val raw = transcribe(pcm)
+                asrResult = transcribe(pcm)
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.ASR,
                     "asr_done",
                     mapOf(
-                        "textLen" to raw.length,
-                        "text" to raw.take(40),
-                        "durMs" to (System.currentTimeMillis() - asrStart),
+                        "textLen" to asrResult.text.length,
+                        "text" to asrResult.text.take(40),
+                        "loadMs" to asrResult.loadMs,
+                        "nativeMs" to asrResult.nativeMs,
                     ),
                 )
 
-                val polishStart = System.currentTimeMillis()
-                val finalText = if (settings.polishEnabled && raw.isNotBlank()) {
+                polishResult = if (settings.polishEnabled && asrResult.text.isNotBlank()) {
                     pushState(BallState.Polishing)
-                    polish(raw, settings.llmModelId)
-                } else raw
+                    polish(asrResult.text, settings.llmModelId)
+                } else {
+                    PolishResult(asrResult.text)
+                }
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.LLM,
                     "polish_done",
                     mapOf(
                         "polishEnabled" to settings.polishEnabled,
-                        "textLen" to finalText.length,
-                        "text" to finalText.take(40),
-                        "durMs" to (System.currentTimeMillis() - polishStart),
+                        "textLen" to polishResult.text.length,
+                        "text" to polishResult.text.take(40),
+                        "loadMs" to polishResult.loadMs,
+                        "prefillMs" to polishResult.prefillMs,
+                        "decodeMs" to polishResult.decodeMs,
+                        "firstTokenMs" to polishResult.firstTokenMs,
                     ),
                 )
 
-                val result = runInsertion(finalText)
+                val insertStart = System.currentTimeMillis()
+                val result = runInsertion(polishResult.text)
+                insertMs = System.currentTimeMillis() - insertStart
                 applyResult(result)
             } catch (t: Throwable) {
                 OpenFlowLog.e(OpenFlowLog.Tag.FGS, "commit_failed", t)
                 applyResult(PipelineResult.Failed("处理失败:${t.javaClass.simpleName}"))
             } finally {
+                OpenFlowLog.d(
+                    OpenFlowLog.Tag.FGS,
+                    "pipeline_summary",
+                    mapOf(
+                        "e2e_ms" to (System.currentTimeMillis() - tCommit),
+                        "pcm_collect_ms" to pcmCollectMs,
+                        "asr_load_ms" to asrResult.loadMs,
+                        "asr_native_ms" to asrResult.nativeMs,
+                        "polish_load_ms" to polishResult.loadMs,
+                        "polish_prefill_ms" to polishResult.prefillMs,
+                        "polish_decode_ms" to polishResult.decodeMs,
+                        "polish_first_token_ms" to polishResult.firstTokenMs,
+                        "insert_ms" to insertMs,
+                    ),
+                )
                 OpenFlowLog.flush()
                 stopSelfSafely()
             }
@@ -173,10 +207,10 @@ class RecordingForegroundService : Service() {
         stopSelfSafely()
     }
 
-    private suspend fun transcribe(pcm: ShortArray): String {
+    private suspend fun transcribe(pcm: ShortArray): WhisperResult {
         if (pcm.isEmpty()) {
             OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_empty_pcm")
-            return ""
+            return WhisperResult("")
         }
         val settings = settingsStore.current()
         val model = ModelCatalog.byId(settings.whisperModelId) ?: ModelCatalog.whisperDefault
@@ -188,15 +222,15 @@ class RecordingForegroundService : Service() {
         )
         if (!ready) {
             Log.w(TAG, "Whisper model not ready: ${model.id}")
-            return ""
+            return WhisperResult("")
         }
         val engine = whisperEngine ?: WhisperEngine(modelStore.pathFor(model).absolutePath)
             .also { whisperEngine = it }
         return engine.transcribe(pcm, language = "auto")
     }
 
-    private suspend fun polish(text: String, llmModelId: String): String {
-        if (text.isBlank()) return text
+    private suspend fun polish(text: String, llmModelId: String): PolishResult {
+        if (text.isBlank()) return PolishResult(text)
         val model = ModelCatalog.byId(llmModelId) ?: ModelCatalog.llmDefault
         val ready = modelStore.isReady(model)
         OpenFlowLog.d(
@@ -206,7 +240,7 @@ class RecordingForegroundService : Service() {
         )
         if (!ready) {
             Log.w(TAG, "LLM model not ready: ${model.id}")
-            return text
+            return PolishResult(text)
         }
         val engine = polishEngine ?: PolishEngine(
             modelPath = modelStore.pathFor(model).absolutePath,

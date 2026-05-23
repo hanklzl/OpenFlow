@@ -15,9 +15,13 @@ class WhisperEngine(private val modelPath: String) {
 
     private val mutex = Mutex()
     @Volatile private var handle: Long = 0L
+    @Volatile private var lastLoadMs: Long = -1L
 
     suspend fun ensureLoaded(): Boolean = mutex.withLock {
-        if (handle != 0L) return@withLock true
+        if (handle != 0L) {
+            lastLoadMs = 0L
+            return@withLock true
+        }
         if (!WhisperJni.loaded) {
             OpenFlowLog.d(OpenFlowLog.Tag.ASR, "whisper_lib_not_loaded")
             return@withLock false
@@ -35,16 +39,18 @@ class WhisperEngine(private val modelPath: String) {
                 OpenFlowLog.e(OpenFlowLog.Tag.ASR, "whisper_load_failed", it)
             }
         val ok = handle != 0L
+        lastLoadMs = System.currentTimeMillis() - t0
         OpenFlowLog.d(
             OpenFlowLog.Tag.ASR,
             "whisper_load_done",
-            mapOf("ok" to ok, "durMs" to (System.currentTimeMillis() - t0)),
+            mapOf("ok" to ok, "durMs" to lastLoadMs),
         )
         ok
     }
 
-    suspend fun transcribe(pcm: ShortArray, language: String = "auto"): String {
-        if (!ensureLoaded()) return ""
+    suspend fun transcribe(pcm: ShortArray, language: String = "auto"): WhisperResult {
+        if (!ensureLoaded()) return WhisperResult("", loadMs = lastLoadMs)
+        val loadMs = lastLoadMs
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 val t0 = System.currentTimeMillis()
@@ -59,15 +65,13 @@ class WhisperEngine(private val modelPath: String) {
                         OpenFlowLog.e(OpenFlowLog.Tag.ASR, "whisper_transcribe_failed", it)
                         ""
                     }
+                val nativeMs = System.currentTimeMillis() - t0
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.ASR,
                     "whisper_transcribe_done",
-                    mapOf(
-                        "textLen" to out.length,
-                        "durMs" to (System.currentTimeMillis() - t0),
-                    ),
+                    mapOf("textLen" to out.length, "durMs" to nativeMs),
                 )
-                out
+                WhisperResult(text = out, loadMs = loadMs, nativeMs = nativeMs)
             }
         }
     }
@@ -83,3 +87,9 @@ class WhisperEngine(private val modelPath: String) {
         private const val TAG = "WhisperEngine"
     }
 }
+
+data class WhisperResult(
+    val text: String,
+    val loadMs: Long = -1L,
+    val nativeMs: Long = -1L,
+)

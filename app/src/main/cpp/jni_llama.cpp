@@ -159,7 +159,10 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
     std::string out;
     out.reserve(static_cast<size_t>(maxNewTokens) * 4);
 
+    const long long prefillMs = nowMs() - promptDecodeStartMs;
+
     const long long generateStartMs = nowMs();
+    long long firstTokenMs = -1;
     for (int i = 0; i < maxNewTokens; ++i) {
         const long long tokenStartMs = nowMs();
         llama_token id = llama_sampler_sample(sampler, h->ctx, -1);
@@ -168,6 +171,7 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
             break;
         }
 
+        if (firstTokenMs < 0) firstTokenMs = nowMs() - generateStartMs;
         out += tokenToString(h->vocab, id);
 
         llama_batch one = llama_batch_get_one(&id, 1);
@@ -178,11 +182,24 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeGenerate(JNIEnv *env, jobject /*thiz*
         LOGI("nativeGenerate token_done step=%d durMs=%lld outBytes=%zu",
              i + 1, nowMs() - tokenStartMs, out.size());
     }
-    LOGI("nativeGenerate done outBytes=%zu genDurMs=%lld totalDurMs=%lld",
-         out.size(), nowMs() - generateStartMs, nowMs() - totalStartMs);
+    const long long decodeMs = nowMs() - generateStartMs;
+    LOGI("nativeGenerate done outBytes=%zu prefillMs=%lld firstTokenMs=%lld decodeMs=%lld totalDurMs=%lld",
+         out.size(), prefillMs, firstTokenMs, decodeMs, nowMs() - totalStartMs);
 
     llama_sampler_free(sampler);
-    return env->NewStringUTF(out.c_str());
+
+    // Piggyback structured metric on the returned string: a NUL-byte-delimited
+    // header followed by the actual generated text. PolishEngine strips it
+    // before returning to callers and surfaces the metric in pipeline_summary.
+    char header[128];
+    int headerLen = snprintf(header, sizeof(header),
+                             "\x01prefill_ms=%lld,decode_ms=%lld,first_token_ms=%lld\x01",
+                             prefillMs, decodeMs, firstTokenMs);
+    std::string combined;
+    combined.reserve(static_cast<size_t>(headerLen) + out.size());
+    combined.append(header, static_cast<size_t>(headerLen));
+    combined.append(out);
+    return env->NewStringUTF(combined.c_str());
 }
 
 JNIEXPORT void JNICALL
