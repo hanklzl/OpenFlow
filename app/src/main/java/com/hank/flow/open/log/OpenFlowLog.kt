@@ -23,7 +23,7 @@ import java.io.File
  */
 object OpenFlowLog {
 
-    enum class Tag { A11Y, OVERLAY, FGS, ASR, LLM, INSERT, AUDIO, APP }
+    enum class Tag { A11Y, OVERLAY, FGS, ASR, LLM, INSERT, AUDIO, APP, MODEL }
 
     private const val AES_KEY = "0123456789abcdef"
     private const val AES_IV = "abcdef0123456789"
