@@ -15,3 +15,4 @@ captures/
 .env.release.local
 app/release/
 tools/logan/out/
+.worktrees/
