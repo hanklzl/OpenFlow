@@ -5,6 +5,8 @@
 #include <vector>
 #include <cstring>
 #include <chrono>
+#include <algorithm>
+#include <cctype>
 
 #define LOG_TAG "LlamaJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO,  LOG_TAG, __VA_ARGS__)
@@ -61,6 +63,73 @@ std::string tokenToString(const llama_vocab *vocab, llama_token token) {
     return std::string(buf, static_cast<size_t>(n));
 }
 
+std::string trimLower(std::string value) {
+    auto start = value.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos) return "";
+    auto end = value.find_last_not_of(" \t\r\n");
+    value = value.substr(start, end - start + 1);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+bool mapBackendNameToRegistry(const std::string &backend, const char *&outRegName) {
+    if (backend.empty()) {
+        return false;
+    }
+    if (backend == "vulkan") {
+        outRegName = "Vulkan";
+        return true;
+    }
+    if (backend == "opencl") {
+        outRegName = "OpenCL";
+        return true;
+    }
+    return false;
+}
+
+bool findDeviceForBackend(const char *regName, ggml_backend_dev_t &outDevice) {
+    outDevice = nullptr;
+    ggml_backend_reg_t reg = ggml_backend_reg_by_name(regName);
+    if (reg == nullptr) {
+        return false;
+    }
+
+    const size_t devCount = ggml_backend_reg_dev_count(reg);
+    for (size_t i = 0; i < devCount; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_reg_dev_get(reg, i);
+        if (dev == nullptr) {
+            continue;
+        }
+        const auto type = ggml_backend_dev_type(dev);
+        if (type != GGML_BACKEND_DEVICE_TYPE_CPU) {
+            outDevice = dev;
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string jStringToUtf8(JNIEnv *env, jstring jValue) {
+    if (env == nullptr || jValue == nullptr) return "";
+    const char *raw = env->GetStringUTFChars(jValue, nullptr);
+    if (raw == nullptr) return "";
+    std::string value(raw);
+    env->ReleaseStringUTFChars(jValue, raw);
+    return value;
+}
+
+std::string sanitizeDeviceField(const char *value) {
+    std::string out = value == nullptr ? "" : value;
+    for (char &ch : out) {
+        if (ch == '\t' || ch == '\n' || ch == '\r') {
+            ch = ' ';
+        }
+    }
+    return out.empty() ? "unknown" : out;
+}
+
 } // namespace
 
 extern "C" {
@@ -68,7 +137,7 @@ extern "C" {
 JNIEXPORT jlong JNICALL
 Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
                                                 jstring jModelPath, jint ctxSize,
-                                                jint nGpuLayers) {
+                                                jint nGpuLayers, jstring jBackendName) {
     if (!gBackendInitialized) {
         llama_backend_init();
         gBackendInitialized = true;
@@ -77,6 +146,39 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
 
     llama_model_params mparams = llama_model_default_params();
     mparams.n_gpu_layers = nGpuLayers;
+
+    ggml_backend_dev_t userBackendDev = nullptr;
+    ggml_backend_dev_t selectedDevices[2] = {nullptr, nullptr};
+    const std::string backend = trimLower(jStringToUtf8(env, jBackendName));
+
+    if (!backend.empty() && backend != "cpu") {
+        if (backend == "vulkan" || backend == "opencl") {
+            const char *regName = nullptr;
+            if (!mapBackendNameToRegistry(backend, regName)) {
+                LOGE("backend=%s mapping failed", backend.c_str());
+                env->ReleaseStringUTFChars(jModelPath, modelPath);
+                return 0;
+            }
+
+            // force backend auto registration for explicit backend mode
+            ggml_backend_load_all();
+            if (!findDeviceForBackend(regName, userBackendDev)) {
+                LOGE("backend %s requested but no suitable %s device found", backend.c_str(), regName);
+                env->ReleaseStringUTFChars(jModelPath, modelPath);
+                return 0;
+            }
+
+            selectedDevices[0] = userBackendDev;
+            mparams.devices = selectedDevices;
+        } else {
+            LOGE("unknown backend=%s", backend.c_str());
+            env->ReleaseStringUTFChars(jModelPath, modelPath);
+            return 0;
+        }
+    } else {
+        mparams.n_gpu_layers = 0;
+    }
+
     llama_model *model = llama_model_load_from_file(modelPath, mparams);
     env->ReleaseStringUTFChars(jModelPath, modelPath);
     if (model == nullptr) {
@@ -104,6 +206,39 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
     LOGI("Llama context initialized (ctx=%d, batch=%u, ubatch=%u, threads=%d/%d)",
          ctxSize, cparams.n_batch, cparams.n_ubatch, cparams.n_threads, cparams.n_threads_batch);
     return reinterpret_cast<jlong>(holder);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativeSupportsGpuOffload(JNIEnv * /*env*/, jobject /*thiz*/) {
+    return static_cast<jboolean>(llama_supports_gpu_offload());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_hank_flow_open_llm_LlamaJni_nativeListBackendDevices(JNIEnv *env, jobject /*thiz*/) {
+    ggml_backend_load_all();
+    const size_t total = ggml_backend_dev_count();
+    std::string out;
+    for (size_t i = 0; i < total; ++i) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (dev == nullptr) {
+            continue;
+        }
+        const std::string name = sanitizeDeviceField(ggml_backend_dev_name(dev));
+        const std::string desc = sanitizeDeviceField(ggml_backend_dev_description(dev));
+        const auto type = ggml_backend_dev_type(dev);
+        const char *typeName = type == GGML_BACKEND_DEVICE_TYPE_CPU
+                                   ? "cpu"
+                                   : (type == GGML_BACKEND_DEVICE_TYPE_IGPU ? "igpu" : "gpu");
+        if (!out.empty()) {
+            out += "\n";
+        }
+        out += name;
+        out += "\t";
+        out += desc;
+        out += "\t";
+        out += typeName;
+    }
+    return env->NewStringUTF(out.c_str());
 }
 
 JNIEXPORT jstring JNICALL

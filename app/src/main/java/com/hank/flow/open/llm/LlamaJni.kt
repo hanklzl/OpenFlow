@@ -10,7 +10,9 @@ object LlamaJni {
 
     val loaded: Boolean get() = WhisperJni.loaded
 
-    external fun nativeInit(modelPath: String, ctxSize: Int, nGpuLayers: Int): Long
+    external fun nativeInit(modelPath: String, ctxSize: Int, nGpuLayers: Int, backendName: String?): Long
+    external fun nativeSupportsGpuOffload(): Boolean
+    external fun nativeListBackendDevices(): String
     external fun nativeGenerate(handle: Long, prompt: String, maxNewTokens: Int, temperature: Float, topP: Float): String
     external fun nativeGenerateStreaming(
         handle: Long,
@@ -51,4 +53,86 @@ object LlamaJni {
         /** Returning false aborts generation; the partial output is still flushed. */
         fun onToken(piece: String): Boolean
     }
+}
+
+interface LlamaBridge {
+    val loaded: Boolean
+    fun init(modelPath: String, ctxSize: Int, nGpuLayers: Int, backendName: String?): Long
+    fun supportsGpuOffload(): Boolean = false
+    fun listBackendDevices(): String = ""
+    fun generate(handle: Long, prompt: String, maxNewTokens: Int, temperature: Float, topP: Float): String
+    fun generateStreaming(
+        handle: Long,
+        prompt: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: LlamaJni.TokenSink,
+    ): String
+    fun prewarmPrefix(handle: Long, prefixText: String): Long
+    fun polishStreamingWithPrefix(
+        handle: Long,
+        prefixHandle: Long,
+        userText: String,
+        suffix: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: LlamaJni.TokenSink,
+    ): String
+    fun freePrefix(prefixHandle: Long)
+    fun free(handle: Long)
+}
+
+internal object JniLlamaBridge : LlamaBridge {
+    override val loaded: Boolean
+        get() = LlamaJni.loaded
+
+    override fun init(modelPath: String, ctxSize: Int, nGpuLayers: Int, backendName: String?): Long =
+        LlamaJni.nativeInit(modelPath, ctxSize, nGpuLayers, backendName)
+
+    override fun supportsGpuOffload(): Boolean =
+        runCatching { LlamaJni.nativeSupportsGpuOffload() }.getOrDefault(false)
+
+    override fun listBackendDevices(): String =
+        runCatching { LlamaJni.nativeListBackendDevices() }.getOrDefault("")
+
+    override fun generate(handle: Long, prompt: String, maxNewTokens: Int, temperature: Float, topP: Float): String =
+        LlamaJni.nativeGenerate(handle, prompt, maxNewTokens, temperature, topP)
+
+    override fun generateStreaming(
+        handle: Long,
+        prompt: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: LlamaJni.TokenSink,
+    ): String = LlamaJni.nativeGenerateStreaming(handle, prompt, maxNewTokens, temperature, topP, sink)
+
+    override fun prewarmPrefix(handle: Long, prefixText: String): Long =
+        LlamaJni.nativePrewarmPrefix(handle, prefixText)
+
+    override fun polishStreamingWithPrefix(
+        handle: Long,
+        prefixHandle: Long,
+        userText: String,
+        suffix: String,
+        maxNewTokens: Int,
+        temperature: Float,
+        topP: Float,
+        sink: LlamaJni.TokenSink,
+    ): String = LlamaJni.nativePolishStreamingWithPrefix(
+        handle,
+        prefixHandle,
+        userText,
+        suffix,
+        maxNewTokens,
+        temperature,
+        topP,
+        sink,
+    )
+
+    override fun freePrefix(prefixHandle: Long) = LlamaJni.nativeFreePrefix(prefixHandle)
+
+    override fun free(handle: Long) = LlamaJni.nativeFree(handle)
 }

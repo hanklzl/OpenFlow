@@ -30,6 +30,10 @@
         android:theme="@style/Theme.OpenFlow"
         tools:targetApi="34">
 
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

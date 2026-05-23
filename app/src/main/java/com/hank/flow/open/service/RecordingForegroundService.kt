@@ -21,6 +21,8 @@ import com.hank.flow.open.insertion.StreamingHandle
 import com.hank.flow.open.insertion.TextInserter
 import com.hank.flow.open.insertion.decideOutcome
 import com.hank.flow.open.asr.WhisperResult
+import com.hank.flow.open.llm.InferenceBackend
+import com.hank.flow.open.llm.InferenceBackendRuntime
 import com.hank.flow.open.llm.PolishEngine
 import com.hank.flow.open.llm.PolishResult
 import com.hank.flow.open.log.OpenFlowLog
@@ -67,6 +69,7 @@ class RecordingForegroundService : Service() {
 
     private var whisperEngine: WhisperEngine? = null
     private var polishEngine: PolishEngine? = null
+    private var polishEngineKey: PolishEngineKey? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -482,10 +485,37 @@ class RecordingForegroundService : Service() {
             Log.w(TAG, "LLM model not ready: ${model.id}")
             return null
         }
-        return polishEngine ?: PolishEngine(
-            modelPath = modelStore.pathFor(model).absolutePath,
+        val backendAvailability = InferenceBackendRuntime.resolve(applicationContext, s)
+        OpenFlowLog.d(
+            OpenFlowLog.Tag.LLM,
+            "llm_backend_resolved",
+            mapOf(
+                "accelEnabled" to s.llmAccelerationEnabled,
+                "requested" to backendAvailability.requested.id,
+                "resolved" to backendAvailability.resolved.name,
+                "supported" to backendAvailability.supported,
+                "reason" to (backendAvailability.unavailableReason?.name ?: ""),
+                "nGpuLayers" to backendAvailability.nGpuLayers,
+            ),
+        )
+        val modelPath = modelStore.pathFor(model).absolutePath
+        val key = PolishEngineKey(
+            modelPath = modelPath,
             isQwen3 = model.id.startsWith("qwen3-"),
-        ).also { polishEngine = it }
+            backend = backendAvailability.resolved,
+            nGpuLayers = backendAvailability.nGpuLayers,
+        )
+        polishEngine?.takeIf { polishEngineKey == key }?.let { return it }
+        polishEngine?.let { old -> scope.launch { old.release() } }
+        return PolishEngine(
+            modelPath = modelPath,
+            isQwen3 = key.isQwen3,
+            backend = key.backend,
+            nGpuLayers = key.nGpuLayers,
+        ).also {
+            polishEngine = it
+            polishEngineKey = key
+        }
     }
 
     private fun runInsertion(text: String): PipelineResult {
@@ -573,6 +603,7 @@ class RecordingForegroundService : Service() {
         }
         whisperEngine = null
         polishEngine = null
+        polishEngineKey = null
         scope.cancel()
         super.onDestroy()
     }
@@ -632,4 +663,11 @@ class RecordingForegroundService : Service() {
         private const val DEBOUNCE_CHARS = 4
         private const val DEBOUNCE_MS = 80L
     }
+
+    private data class PolishEngineKey(
+        val modelPath: String,
+        val isQwen3: Boolean,
+        val backend: InferenceBackend,
+        val nGpuLayers: Int,
+    )
 }

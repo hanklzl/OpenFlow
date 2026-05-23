@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +39,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hank.flow.open.R
+import com.hank.flow.open.llm.InferenceBackend
+import com.hank.flow.open.llm.InferenceBackendAvailability
+import com.hank.flow.open.llm.InferenceBackendPreference
+import com.hank.flow.open.llm.InferenceBackendRuntime
+import com.hank.flow.open.llm.InferenceBackendUnavailableReason
 import com.hank.flow.open.log.LogExporter
 import com.hank.flow.open.settings.CustomDictionary
 import com.hank.flow.open.settings.FlowSettings
@@ -57,6 +63,8 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             editBeforeInsertEnabled = false,
             polishWarmupEnabled = true,
             polishStreamingEnabled = true,
+            llmAccelerationEnabled = false,
+            llmInferenceBackend = InferenceBackendPreference.Auto,
             customDictionaryEntries = emptyList(),
             whisperModelId = "",
             llmModelId = "",
@@ -64,6 +72,9 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
         )
     }
     val settings by store.flow.collectAsState(initial = initial)
+    val backendAvailability = remember(settings.llmInferenceBackend) {
+        InferenceBackendRuntime.detector(context).resolve(settings.llmInferenceBackend)
+    }
     var pendingDictionaryEntry by rememberSaveable { mutableStateOf("") }
 
     LazyColumn(
@@ -110,6 +121,17 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
                 description = "LLM 出第一个字就开始写入输入框，无需等整段润色完成；个别 IME 可能闪烁可关闭",
                 checked = settings.polishStreamingEnabled,
                 onChange = { scope.launch { store.setPolishStreamingEnabled(it) } },
+            )
+            Toggle(
+                label = stringResource(R.string.settings_llm_acceleration_title),
+                description = llmAccelerationDescription(backendAvailability),
+                checked = settings.llmAccelerationEnabled && backendAvailability.supported,
+                enabled = backendAvailability.supported,
+                onChange = { scope.launch { store.setLlmAccelerationEnabled(it) } },
+            )
+            BackendPreferenceSection(
+                selected = settings.llmInferenceBackend,
+                onSelect = { scope.launch { store.setLlmInferenceBackend(it) } },
             )
 
             Spacer(Modifier.height(20.dp))
@@ -159,6 +181,63 @@ fun SettingsScreen(modifier: Modifier = Modifier) {
             DiagnosticsSection()
         }
     }
+}
+
+@Composable
+private fun BackendPreferenceSection(
+    selected: InferenceBackendPreference,
+    onSelect: (InferenceBackendPreference) -> Unit,
+) {
+    Text(stringResource(R.string.settings_llm_backend_title), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(6.dp))
+    BackendOptionRow(
+        label = stringResource(R.string.settings_llm_backend_auto),
+        selected = selected == InferenceBackendPreference.Auto,
+        onClick = { onSelect(InferenceBackendPreference.Auto) },
+    )
+    BackendOptionRow(
+        label = stringResource(R.string.settings_llm_backend_opencl),
+        selected = selected == InferenceBackendPreference.OpenCl,
+        onClick = { onSelect(InferenceBackendPreference.OpenCl) },
+    )
+    BackendOptionRow(
+        label = stringResource(R.string.settings_llm_backend_vulkan),
+        selected = selected == InferenceBackendPreference.Vulkan,
+        onClick = { onSelect(InferenceBackendPreference.Vulkan) },
+    )
+}
+
+@Composable
+private fun BackendOptionRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(label, fontSize = 14.sp)
+    }
+}
+
+@Composable
+private fun llmAccelerationDescription(availability: InferenceBackendAvailability): String {
+    if (availability.supported) {
+        val backend = when (availability.resolved) {
+            InferenceBackend.OpenCl -> stringResource(R.string.settings_llm_backend_opencl)
+            InferenceBackend.Vulkan -> stringResource(R.string.settings_llm_backend_vulkan)
+            InferenceBackend.Cpu -> stringResource(R.string.settings_llm_backend_cpu)
+        }
+        return stringResource(R.string.settings_llm_acceleration_supported, backend)
+    }
+    val reason = when (availability.unavailableReason) {
+        InferenceBackendUnavailableReason.BuildMissing -> R.string.settings_llm_acceleration_build_missing
+        InferenceBackendUnavailableReason.RuntimeMissing -> R.string.settings_llm_acceleration_runtime_missing
+        InferenceBackendUnavailableReason.NativeBackendMissing -> R.string.settings_llm_acceleration_native_missing
+        InferenceBackendUnavailableReason.DeviceUnsupported -> R.string.settings_llm_acceleration_device_unsupported
+        null -> R.string.settings_llm_acceleration_native_missing
+    }
+    return stringResource(reason)
 }
 
 @Composable
@@ -266,7 +345,15 @@ private fun DiagnosticsSection() {
 }
 
 @Composable
-private fun Toggle(label: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun Toggle(
+    label: String,
+    description: String,
+    checked: Boolean,
+    enabled: Boolean = true,
+    onChange: (Boolean) -> Unit,
+) {
+    val labelColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f)
+    val descriptionColor = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 0.65f else 0.38f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -274,13 +361,13 @@ private fun Toggle(label: String, description: String, checked: Boolean, onChang
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(label, fontSize = 15.sp, fontWeight = FontWeight.Medium, color = labelColor)
             Text(
                 description,
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                color = descriptionColor,
             )
         }
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked && enabled, onCheckedChange = onChange, enabled = enabled)
     }
 }

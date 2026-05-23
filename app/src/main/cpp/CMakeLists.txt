@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
 # --- Disable everything we don't need from the upstream submodules ---
 set(BUILD_SHARED_LIBS              OFF CACHE BOOL "" FORCE)
 set(GGML_NATIVE                    OFF CACHE BOOL "" FORCE)
@@ -28,24 +30,21 @@ endif()
 
 # Phase 6 (experimental): Vulkan GPU backend. Default OFF.
 #
-# See docs/dev-harness/research/gpu-inference-feasibility.md for the full
-# evaluation. TL;DR: technically possible but requires the LunarG Vulkan SDK
-# on the host (provides SPIRV-Headers + the Vulkan CMake config that
-# llama.cpp's ggml-vulkan does `find_package(Vulkan COMPONENTS glslc REQUIRED)`
-# + `find_package(SPIRV-Headers REQUIRED)` against). NDK's bundled glslc alone
-# is NOT enough. Also adds 5-10 min/ABI build time + ~5-8 MB APK + needs
-# runtime CPU-fallback path that's not yet implemented.
-#
-# To experiment locally:
-#   1. Install LunarG Vulkan SDK (https://vulkan.lunarg.com)
-#   2. source the SDK setup script (or set VULKAN_SDK / CMAKE_PREFIX_PATH)
-#   3. ./gradlew :app:assembleDebug -POpenflowEnableVulkan=true
-#
-# We auto-add NDK r25+'s bundled glslc to PATH so vulkan-shaders-gen finds it
-# even if the SDK ships a different version. SPIRV-Headers and the Vulkan
-# CMake config must come from the SDK.
+# NDK r25+ bundles glslc and SPIR-V headers but not a SPIRV-Headers CMake
+# package config, so OpenFlow provides a tiny FindSPIRV-Headers module under
+# cpp/cmake for llama.cpp's find_package call.
 option(OPENFLOW_ENABLE_VULKAN "Compile in ggml-vulkan backend (experimental, needs LunarG SDK)" OFF)
 if (OPENFLOW_ENABLE_VULKAN)
+    set(_openflow_vulkan_headers "${CMAKE_CURRENT_LIST_DIR}/third_party/Vulkan-Headers/include")
+    if (EXISTS "${_openflow_vulkan_headers}/vulkan/vulkan.hpp")
+        # NDK r29 ships Vulkan C headers but not Vulkan-Hpp. ggml-vulkan includes
+        # <vulkan/vulkan.hpp>, so use Khronos headers pinned to NDK r29's
+        # VK_HEADER_VERSION=275.
+        include_directories(BEFORE SYSTEM "${_openflow_vulkan_headers}")
+    else()
+        message(FATAL_ERROR "OpenFlow: Vulkan-Headers submodule is missing vulkan/vulkan.hpp")
+    endif()
+
     if (DEFINED CMAKE_ANDROID_NDK)
         set(_openflow_ndk_root "${CMAKE_ANDROID_NDK}")
     elseif (DEFINED ANDROID_NDK)
@@ -68,8 +67,71 @@ if (OPENFLOW_ENABLE_VULKAN)
         set(ENV{PATH} "${_openflow_glslc_dir}:$ENV{PATH}")
         message(STATUS "OpenFlow: prepending NDK shader-tools to PATH (${_openflow_glslc_dir})")
     endif()
+    get_filename_component(_openflow_cmake_bin_dir "${CMAKE_COMMAND}" DIRECTORY)
+    if (EXISTS "${_openflow_cmake_bin_dir}/ninja")
+        set(ENV{PATH} "${_openflow_cmake_bin_dir}:$ENV{PATH}")
+    endif()
+    if (APPLE)
+        set(_openflow_host_compiler_paths /usr/bin /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin)
+    elseif (UNIX)
+        set(_openflow_host_compiler_paths /usr/bin /usr/local/bin)
+    endif()
+    find_program(_openflow_host_c_compiler NAMES clang gcc cc PATHS ${_openflow_host_compiler_paths} NO_DEFAULT_PATH)
+    find_program(_openflow_host_cxx_compiler NAMES clang++ g++ c++ PATHS ${_openflow_host_compiler_paths} NO_DEFAULT_PATH)
+    execute_process(
+        COMMAND uname -m
+        OUTPUT_VARIABLE _openflow_host_processor
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (NOT _openflow_host_processor)
+        set(_openflow_host_processor "${CMAKE_HOST_SYSTEM_PROCESSOR}")
+    endif()
+    if (NOT CMAKE_MAKE_PROGRAM OR NOT _openflow_host_c_compiler OR NOT _openflow_host_cxx_compiler)
+        message(FATAL_ERROR "OpenFlow: Vulkan shader generator requires host Ninja/C/C++ compilers")
+    endif()
+    configure_file(
+        "${CMAKE_CURRENT_LIST_DIR}/cmake/openflow-vulkan-host-toolchain.cmake.in"
+        "${CMAKE_BINARY_DIR}/openflow-vulkan-host-toolchain.cmake"
+        @ONLY
+    )
+    set(GGML_VULKAN_SHADERS_GEN_TOOLCHAIN
+        "${CMAKE_BINARY_DIR}/openflow-vulkan-host-toolchain.cmake"
+        CACHE FILEPATH "" FORCE
+    )
     set(GGML_VULKAN ON CACHE BOOL "" FORCE)
-    message(STATUS "OpenFlow: Vulkan backend ENABLED (requires LunarG Vulkan SDK on host for SPIRV-Headers)")
+    message(STATUS "OpenFlow: Vulkan backend ENABLED")
+endif()
+
+option(OPENFLOW_ENABLE_OPENCL "Compile in ggml-opencl backend (experimental, requires OpenCL SDK + Python3)" OFF)
+if (OPENFLOW_ENABLE_OPENCL)
+    # Android's NDK does not ship OpenCL headers or a stable libOpenCL.so.
+    # Build Khronos' ICD loader for each Android ABI instead of linking a host
+    # SDK library. The loader is static so libopenflow_jni.so can still load on
+    # devices without OpenCL; it will dlopen a vendor ICD only when available.
+    set(OPENCL_ICD_LOADER_HEADERS_DIR
+        "${CMAKE_CURRENT_LIST_DIR}/third_party/OpenCL-Headers"
+        CACHE PATH "" FORCE
+    )
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPENCL_HEADERS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPENCL_HEADERS_BUILD_CXX_TESTS OFF CACHE BOOL "" FORCE)
+    set(OPENCL_ICD_LOADER_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(OPENCL_ICD_LOADER_PIC ON CACHE BOOL "" FORCE)
+    set(OPENCL_ICD_LOADER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPENCL_LAYERS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_OPENCL_LAYERINFO OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/OpenCL-ICD-Loader EXCLUDE_FROM_ALL)
+    if (TARGET OpenCL)
+        set_target_properties(OpenCL PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    endif()
+
+    set(GGML_OPENCL ON CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_EMBED_KERNELS ON CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_PROFILING OFF CACHE BOOL "" FORCE)
+    set(GGML_OPENCL_TARGET_VERSION "300" CACHE STRING "" FORCE)
+    message(STATUS "OpenFlow: OpenCL backend ENABLED (ggml-opencl)")
 endif()
 
 set(LLAMA_BUILD_TESTS              OFF CACHE BOOL "" FORCE)

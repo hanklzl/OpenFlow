@@ -9,6 +9,9 @@ import kotlinx.coroutines.withContext
 class PolishEngine(
     private val modelPath: String,
     private val isQwen3: Boolean = false,
+    private val backend: InferenceBackend = InferenceBackend.Cpu,
+    private val nGpuLayers: Int = 0,
+    private val bridge: LlamaBridge = JniLlamaBridge,
 ) {
 
     private val mutex = Mutex()
@@ -22,30 +25,61 @@ class PolishEngine(
             lastLoadMs = 0L
             return@withLock true
         }
-        if (!LlamaJni.loaded) return@withLock false
+        if (!bridge.loaded) return@withLock false
         val t0 = System.currentTimeMillis()
-        runCatching { LlamaJni.nativeInit(modelPath, CTX_SIZE, 0) }
+        runCatching { initWithFallback() }
             .onSuccess { handle = it }
-            .onFailure { Log.e(TAG, "nativeInit failed", it) }
+            .onFailure { logError("nativeInit failed", it) }
         if (handle != 0L) {
             // Phase 5: prewarm the system+ChatML prefix into a KV-state blob
             // so each polish only prefills the user transcript + suffix.
             // Failure here is non-fatal — polish falls back to the full prompt path.
             val prefixText = PolishPrompt.systemPrefix()
             val expectedSig = signatureFor(prefixText)
-            runCatching { LlamaJni.nativePrewarmPrefix(handle, prefixText) }
+            runCatching { bridge.prewarmPrefix(handle, prefixText) }
                 .onSuccess { ptr ->
                     if (ptr != 0L) {
                         prefixHandle = ptr
                         prefixSignature = expectedSig
                     } else {
-                        Log.w(TAG, "nativePrewarmPrefix returned 0; falling back to full prompt")
+                        logWarn("nativePrewarmPrefix returned 0; falling back to full prompt")
                     }
                 }
-                .onFailure { Log.e(TAG, "nativePrewarmPrefix failed", it) }
+                .onFailure { logError("nativePrewarmPrefix failed", it) }
         }
         lastLoadMs = System.currentTimeMillis() - t0
         handle != 0L
+    }
+
+    private fun initWithFallback(): Long {
+        val requestedBackendName = backend.nativeName
+        val requestedGpuLayers = if (backend == InferenceBackend.Cpu) 0 else nGpuLayers
+        if (backend == InferenceBackend.Cpu) {
+            return bridge.init(
+                modelPath = modelPath,
+                ctxSize = CTX_SIZE,
+                nGpuLayers = 0,
+                backendName = null,
+            )
+        }
+        val acceleratedHandle = runCatching {
+            bridge.init(
+                modelPath = modelPath,
+                ctxSize = CTX_SIZE,
+                nGpuLayers = requestedGpuLayers,
+                backendName = requestedBackendName,
+            )
+        }.getOrElse {
+            logError("accelerated nativeInit failed; retrying CPU", it)
+            0L
+        }
+        if (acceleratedHandle != 0L) return acceleratedHandle
+        return bridge.init(
+            modelPath = modelPath,
+            ctxSize = CTX_SIZE,
+            nGpuLayers = 0,
+            backendName = null,
+        )
     }
 
     private fun signatureFor(prefixText: String): String =
@@ -59,10 +93,10 @@ class PolishEngine(
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 runCatching {
-                    val raw = LlamaJni.nativeGenerate(handle, prompt, maxNewTokens, TEMPERATURE, TOP_P)
+                    val raw = bridge.generate(handle, prompt, maxNewTokens, TEMPERATURE, TOP_P)
                     buildResult(raw, loadMs)
                 }.getOrElse {
-                    Log.e(TAG, "polish failed", it)
+                    logError("polish failed", it)
                     PolishResult(rawText, loadMs = loadMs)
                 }
             }
@@ -99,7 +133,7 @@ class PolishEngine(
                     val expectedSig = signatureFor(PolishPrompt.systemPrefix())
                     val usePrefix = prefixHandle != 0L && prefixSignature == expectedSig
                     val raw = if (usePrefix) {
-                        LlamaJni.nativePolishStreamingWithPrefix(
+                        bridge.polishStreamingWithPrefix(
                             handle,
                             prefixHandle,
                             rawText,
@@ -111,13 +145,13 @@ class PolishEngine(
                         )
                     } else {
                         val prompt = PolishPrompt.build(rawText, appendNoThink = isQwen3)
-                        LlamaJni.nativeGenerateStreaming(
+                        bridge.generateStreaming(
                             handle, prompt, maxNewTokens, TEMPERATURE, TOP_P, sink,
                         )
                     }
                     buildResult(raw, loadMs)
                 }.getOrElse {
-                    Log.e(TAG, "polishStreaming failed", it)
+                    logError("polishStreaming failed", it)
                     PolishResult(rawText, loadMs = loadMs)
                 }
             }
@@ -126,12 +160,12 @@ class PolishEngine(
 
     suspend fun release() = mutex.withLock {
         if (prefixHandle != 0L) {
-            runCatching { LlamaJni.nativeFreePrefix(prefixHandle) }
+            runCatching { bridge.freePrefix(prefixHandle) }
             prefixHandle = 0L
             prefixSignature = null
         }
         if (handle != 0L) {
-            runCatching { LlamaJni.nativeFree(handle) }
+            runCatching { bridge.free(handle) }
             handle = 0L
         }
     }
@@ -145,6 +179,14 @@ class PolishEngine(
             decodeMs = metric.decodeMs,
             firstTokenMs = metric.firstTokenMs,
         )
+    }
+
+    private fun logError(message: String, throwable: Throwable) {
+        runCatching { Log.e(TAG, message, throwable) }
+    }
+
+    private fun logWarn(message: String) {
+        runCatching { Log.w(TAG, message) }
     }
 
     companion object {

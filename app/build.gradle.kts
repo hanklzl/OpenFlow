@@ -30,6 +30,9 @@ val releaseSigningRequested = gradle.startParameter.taskNames.any { taskName ->
         normalizedTaskName.endsWith("Release", ignoreCase = true)
 }
 
+val openflowEnableVulkan = project.findProperty("OpenflowEnableVulkan") == "true"
+val openflowEnableOpenCl = project.findProperty("OpenflowEnableOpenCl") == "true"
+
 fun requiredReleaseSigningEnv(name: String): String =
     providers.environmentVariable(name).orNull
         ?: throw org.gradle.api.GradleException(
@@ -61,11 +64,16 @@ android {
                 //   ./gradlew assembleDebug -POpenflowEnableVulkan=true
                 // First clean build then takes 5-10 extra minutes per ABI to
                 // compile ggml's 181 GLSL shaders via the NDK-bundled glslc.
-                if (project.findProperty("OpenflowEnableVulkan") == "true") {
+                if (openflowEnableVulkan) {
                     arguments += "-DOPENFLOW_ENABLE_VULKAN=ON"
+                }
+                if (openflowEnableOpenCl) {
+                    arguments += "-DOPENFLOW_ENABLE_OPENCL=ON"
                 }
             }
         }
+        buildConfigField("boolean", "OPENFLOW_ENABLE_VULKAN", openflowEnableVulkan.toString())
+        buildConfigField("boolean", "OPENFLOW_ENABLE_OPENCL", openflowEnableOpenCl.toString())
     }
 
     signingConfigs {
@@ -118,6 +126,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {

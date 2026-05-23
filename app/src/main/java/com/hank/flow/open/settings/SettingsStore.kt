@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.hank.flow.open.llm.InferenceBackendPreference
 import com.hank.flow.open.model.ModelCatalog
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -20,6 +21,8 @@ data class FlowSettings(
     val editBeforeInsertEnabled: Boolean,
     val polishWarmupEnabled: Boolean,
     val polishStreamingEnabled: Boolean,
+    val llmAccelerationEnabled: Boolean,
+    val llmInferenceBackend: InferenceBackendPreference,
     val customDictionaryEntries: List<String>,
     val whisperModelId: String,
     val llmModelId: String,
@@ -38,6 +41,9 @@ class SettingsStore(private val context: Context) {
     suspend fun setEditBeforeInsert(enabled: Boolean) = update { it[K_EDIT_BEFORE] = enabled }
     suspend fun setPolishWarmupEnabled(enabled: Boolean) = update { it[K_POLISH_WARMUP] = enabled }
     suspend fun setPolishStreamingEnabled(enabled: Boolean) = update { it[K_POLISH_STREAMING] = enabled }
+    suspend fun setLlmAccelerationEnabled(enabled: Boolean) = update { it[K_LLM_ACCELERATION] = enabled }
+    suspend fun setLlmInferenceBackend(preference: InferenceBackendPreference) =
+        update { it[K_LLM_BACKEND] = preference.id }
     suspend fun setCustomDictionaryEntries(entries: List<String>) =
         update { it[K_CUSTOM_DICTIONARY] = CustomDictionary.serialize(entries) }
     suspend fun setWhisperModelId(id: String) = update { it[K_WHISPER_ID] = id }
@@ -55,6 +61,8 @@ class SettingsStore(private val context: Context) {
         editBeforeInsertEnabled = this[K_EDIT_BEFORE] ?: false,
         polishWarmupEnabled = this[K_POLISH_WARMUP] ?: true,
         polishStreamingEnabled = this[K_POLISH_STREAMING] ?: true,
+        llmAccelerationEnabled = this[K_LLM_ACCELERATION] ?: false,
+        llmInferenceBackend = InferenceBackendPreference.fromId(this[K_LLM_BACKEND]),
         customDictionaryEntries = CustomDictionary.parse(this[K_CUSTOM_DICTIONARY].orEmpty()),
         whisperModelId = this[K_WHISPER_ID] ?: ModelCatalog.whisperDefault.id,
         llmModelId = this[K_LLM_ID] ?: ModelCatalog.llmDefault.id,
@@ -71,6 +79,8 @@ class SettingsStore(private val context: Context) {
         private val K_EDIT_BEFORE = booleanPreferencesKey("edit_before_insert")
         private val K_POLISH_WARMUP = booleanPreferencesKey("polish_warmup_enabled")
         private val K_POLISH_STREAMING = booleanPreferencesKey("polish_streaming_enabled")
+        private val K_LLM_ACCELERATION = booleanPreferencesKey("llm_acceleration_enabled")
+        private val K_LLM_BACKEND = stringPreferencesKey("llm_inference_backend")
         private val K_CUSTOM_DICTIONARY = stringPreferencesKey("custom_dictionary")
         private val K_WHISPER_ID = stringPreferencesKey("whisper_model_id")
         private val K_LLM_ID = stringPreferencesKey("llm_model_id")

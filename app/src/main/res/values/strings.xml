@@ -28,4 +28,16 @@
     <string name="settings_dictionary_add_action">添加词条</string>
     <string name="settings_dictionary_remove_action">删除词条</string>
     <string name="settings_dictionary_empty">暂无词条</string>
+
+    <string name="settings_llm_acceleration_title">硬件加速润色（实验）</string>
+    <string name="settings_llm_acceleration_supported">开启后使用 %1$s 运行本地 LLM；不稳定时会回退 CPU。</string>
+    <string name="settings_llm_acceleration_build_missing">当前安装包未编译 GPU 后端，需使用 Vulkan 或 OpenCL 构建。</string>
+    <string name="settings_llm_acceleration_runtime_missing">当前系统未报告 Vulkan 运行时支持。</string>
+    <string name="settings_llm_acceleration_native_missing">当前 native 后端未发现可用 GPU 设备。</string>
+    <string name="settings_llm_acceleration_device_unsupported">当前实验通道优先支持骁龙 / Adreno，本机暂不开放。</string>
+    <string name="settings_llm_backend_cpu">CPU</string>
+    <string name="settings_llm_backend_title">LLM 推理后端</string>
+    <string name="settings_llm_backend_auto">自动（优先 OpenCL，其次 Vulkan）</string>
+    <string name="settings_llm_backend_vulkan">Vulkan</string>
+    <string name="settings_llm_backend_opencl">OpenCL</string>
 </resources>
