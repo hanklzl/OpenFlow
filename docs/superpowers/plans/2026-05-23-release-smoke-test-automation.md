@@ -12,13 +12,11 @@
 
 ## Spec 与实际差异前置说明
 
-实施期与 [spec](../specs/2026-05-23-release-smoke-test-automation-design.md) 三处对齐：
+实施期与 [spec](../specs/2026-05-23-release-smoke-test-automation-design.md) 一处对齐：
 
-1. **whisper 默认** `ggml-small-q5_1` (190 MB)，非 spec 文档里的 `tiny-q5_1` (39 MB)
-2. **llm 默认** `qwen2.5-1.5b-instruct-q4_k_m` (1.1 GB)，非 spec 文档里的 `qwen3-0.6b...`
-3. **`OpenFlowLog.e(tag, event, t = null, fields = emptyMap())`** — 第 3 参是 `Throwable?`，spec 例子里写的 `e(tag, event, mapOf(...))` 会编译失败，本计划改用 `e(tag, event, fields = mapOf(...))`
+- **`OpenFlowLog.e(tag, event, t = null, fields = emptyMap())`** — 第 3 参是 `Throwable?`，spec 例子里写的 `e(tag, event, mapOf(...))` 会编译失败，本计划改用 `e(tag, event, fields = mapOf(...))`
 
-实施完后 Task 8 同步 spec 文档反映实际默认与速度估算。
+**模型默认选最轻档**：smoke 用 `whisperTiny = ggml-tiny-q5_1` (32 MB) + `llmTinyNewer = qwen3-0.6b-q4_k_m` (~400 MB)，**不**跟随 `ModelCatalog.whisperDefault` (small, 190 MB) 与 `llmDefault` (qwen2.5-1.5b, 1.1 GB)。理由：smoke 验证的是 R8 + JNI + 整链路通畅，不是模型质量；用最轻档把 push + 加载时间压到最低。
 
 ## File Structure
 
@@ -203,8 +201,8 @@ class DebugModelInstallerTest {
 
     @Test
     fun installCopiesSrcToTargetAndDeletesSrcOnFreshInstall() {
-        val src = newSrc("ggml-small-q5_1.bin", size = 1_000_000)
-        val target = newTarget("ggml-small-q5_1.bin")
+        val src = newSrc("ggml-tiny-q5_1.bin", size = 1_000_000)
+        val target = newTarget("ggml-tiny-q5_1.bin")
         val result = DebugModelInstaller.install(src, target, force = false)
 
         assertTrue(result is InstallResult.Done)
@@ -358,7 +356,7 @@ import java.io.File
  *       -a com.hank.flow.open.debug.INSTALL_MODEL_FROM_TMP \
  *       -n com.hank.flow.open/com.hank.flow.open.debug.DebugModelInstallReceiver \
  *       --es srcPath /data/local/tmp/<filename> \
- *       --es modelId ggml-small-q5_1 \
+ *       --es modelId ggml-tiny-q5_1 \
  *       --ez force false
  *
  * 受 signature permission `com.hank.flow.open.permission.DEBUG_SMOKE` 保护，
@@ -560,10 +558,10 @@ set -euo pipefail
 APK="${APK:-app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk}"
 DEVICE=""
 MODELS_DIR="${MODELS_DIR:-$HOME/.openflow-smoke-models}"
-WHISPER="ggml-small-q5_1"                       # ModelCatalog.whisperDefault.id
-WHISPER_FILE="ggml-small-q5_1.bin"              # hfPath 末段；ModelStore.pathFor 会取这个名
-LLM="qwen2.5-1.5b-instruct-q4_k_m"              # ModelCatalog.llmDefault.id
-LLM_FILE="qwen2.5-1.5b-instruct-q4_k_m.gguf"
+WHISPER="ggml-tiny-q5_1"                       # ModelCatalog.whisperDefault.id
+WHISPER_FILE="ggml-tiny-q5_1.bin"              # hfPath 末段；ModelStore.pathFor 会取这个名
+LLM="qwen3-0.6b-q4_k_m"              # ModelCatalog.llmDefault.id
+LLM_FILE="qwen3-0.6b-q4_k_m.gguf"
 POLISH="true"
 FORCE_REINSTALL="false"
 TIMEOUT=60
@@ -820,12 +818,12 @@ grep -n "真机冒烟" .claude/skills/openflow-release-skill/SKILL.md
 
 ```bash
 mkdir -p ~/.openflow-smoke-models
-# Whisper 默认（190 MB）
-curl -L -o ~/.openflow-smoke-models/ggml-small-q5_1.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin
-# LLM 默认（1.1 GB）— 跟随 ModelCatalog.llmDefault.id 调整
-curl -L -o ~/.openflow-smoke-models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-  https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+# Whisper 最轻档（32 MB）
+curl -L -o ~/.openflow-smoke-models/ggml-tiny-q5_1.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
+# LLM 极速档（~400 MB）— 对应 ModelCatalog.llmTinyNewer
+curl -L -o ~/.openflow-smoke-models/qwen3-0.6b-q4_k_m.gguf \
+  https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf
 ```
 
 **每次发布前**：
@@ -843,7 +841,7 @@ bash scripts/release/smoke-test.sh
 
 依赖：`com.hank.flow.open.permission.DEBUG_SMOKE`（signature）保护 `DebugAsrReceiver` + `DebugAssetPipelineService` + `DebugModelInstallReceiver`，adb shell 默认通过；外部应用无法触发。
 
-**首次约 90–120s（含 push 1.1 GB Qwen2.5），第二次起约 15–25s**。
+**首次约 50–70s（含 push ~400 MB Qwen3-0.6b），第二次起约 12–18s**。
 
 #### 手动版（fallback）
 
@@ -899,63 +897,41 @@ git commit -m "docs(skill): openflow-release-skill 第 5 步加自动版 smoke +
 
 ---
 
-## Task 9: 更新 spec 反映实际默认模型 + 速度估算
+## Task 9: 把 spec 「已知限制 / 未覆盖」段里 LLM ID verify 项清掉
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md`
 
-- [ ] **Step 1: 找到 spec 中的默认模型行**
+spec 用 `qwen3-0.6b-instruct-q4_k_m`，实际 catalog id 是 `qwen3-0.6b-q4_k_m`（无 `instruct`）。spec 「已知限制」段曾让实施期 verify，已在本计划落实，相应注脚可删。其余 spec 内容（含速度估算 ~80s）与本计划吻合，无需 sync。
+
+- [ ] **Step 1: 找到对应行**
 
 ```bash
-grep -n "qwen3-0.6b\|ggml-tiny\|tiny-q5_1" docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
+grep -n "ModelCatalog.llmDefault.id\|qwen3-0.6b-instruct-q4_k_m" docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
 ```
 
-- [ ] **Step 2: 把所有 `ggml-tiny-q5_1` 改为 `ggml-small-q5_1`，把所有 `qwen3-0.6b-instruct-q4_k_m` 改为 `qwen2.5-1.5b-instruct-q4_k_m`**
-
-可用 `sed -i ''` (macOS) 批量：
+- [ ] **Step 2: 把 spec 中 `qwen3-0.6b-instruct-q4_k_m` 修正为 `qwen3-0.6b-q4_k_m`**
 
 ```bash
-sed -i '' \
-    -e 's/ggml-tiny-q5_1/ggml-small-q5_1/g' \
-    -e 's/qwen3-0.6b-instruct-q4_k_m/qwen2.5-1.5b-instruct-q4_k_m/g' \
-    -e 's/39 MB/190 MB/g' \
-    -e 's/~500 MB/~1.1 GB/g' \
-    -e 's/qwen3-0.6b/qwen2.5-1.5b/g' \
+sed -i '' 's/qwen3-0\.6b-instruct-q4_k_m/qwen3-0.6b-q4_k_m/g' \
     docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
 ```
 
-- [ ] **Step 3: 手工调整速度估算表**
+- [ ] **Step 3: 删 spec 「已知限制 / 未覆盖」段里的 LLM verify 注脚**
 
-`speed / 成本估算` 表里 push qwen 一行：
+打开 spec 找到这一行：
 
-旧：
 ```
-| push qwen3-0.6b (500 MB) → broadcast install | ~60s **首次** |
-```
-
-新（USB 2.0 ~15 MB/s push 速度）：
-```
-| push qwen2.5-1.5b (1.1 GB) → broadcast install | ~80–100s **首次** |
+- LLM 默认 ID 在 spec 中写作 `qwen3-0.6b-q4_k_m`，实施期需 verify 与 `ModelCatalog.llmDefault.id` 是否一致；不一致则更新 spec + smoke-test.sh 默认值
 ```
 
-旧：
-```
-| **首次总计** | ~80s |
-| **后续每次** | ~15–20s |
-```
+整行删除（plan 已显式选用 `llmTinyNewer = qwen3-0.6b-q4_k_m`，不再跟随 `llmDefault`）。
 
-新：
-```
-| **首次总计** | ~110–140s |
-| **后续每次** | ~15–25s |
-```
-
-把 spec 「已知限制」段里「LLM 默认 ID ... verify ... ModelCatalog.llmDefault.id」一行删除（已在本计划做完）。
-
-- [ ] **Step 4: 跑 grep 确认没遗漏旧字符串**
+- [ ] **Step 4: 跑 grep 确认 spec 无残留**
 
 ```bash
-grep -nE "ggml-tiny-q5_1|qwen3-0.6b" docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
+grep -nE "qwen3-0\.6b-instruct-q4_k_m|ModelCatalog\.llmDefault\.id 是否一致" \
+    docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
 ```
 
 预期：无输出。
@@ -964,7 +940,7 @@ grep -nE "ggml-tiny-q5_1|qwen3-0.6b" docs/superpowers/specs/2026-05-23-release-s
 
 ```bash
 git add docs/superpowers/specs/2026-05-23-release-smoke-test-automation-design.md
-git commit -m "docs(spec): smoke spec 同步实际默认模型 (small/qwen2.5-1.5b) + 速度估算"
+git commit -m "docs(spec): smoke spec 修正 LLM id (无 instruct)，去掉已落实的 verify 注脚"
 ```
 
 ---
@@ -979,12 +955,12 @@ git commit -m "docs(spec): smoke spec 同步实际默认模型 (small/qwen2.5-1.
 ```bash
 # 准备
 mkdir -p ~/.openflow-smoke-models
-[ -f ~/.openflow-smoke-models/ggml-small-q5_1.bin ] || \
-  curl -L -o ~/.openflow-smoke-models/ggml-small-q5_1.bin \
-    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin
-[ -f ~/.openflow-smoke-models/qwen2.5-1.5b-instruct-q4_k_m.gguf ] || \
-  curl -L -o ~/.openflow-smoke-models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-    https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+[ -f ~/.openflow-smoke-models/ggml-tiny-q5_1.bin ] || \
+  curl -L -o ~/.openflow-smoke-models/ggml-tiny-q5_1.bin \
+    https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin
+[ -f ~/.openflow-smoke-models/qwen3-0.6b-q4_k_m.gguf ] || \
+  curl -L -o ~/.openflow-smoke-models/qwen3-0.6b-q4_k_m.gguf \
+    https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q4_K_M.gguf
 
 # 跑
 source .env.release.local
@@ -1006,7 +982,7 @@ adb shell am broadcast \
     -a com.hank.flow.open.debug.INSTALL_MODEL_FROM_TMP \
     -n com.hank.flow.open/com.hank.flow.open.debug.DebugModelInstallReceiver \
     --es srcPath /data/local/tmp/non_existent.bin \
-    --es modelId ggml-small-q5_1
+    --es modelId ggml-tiny-q5_1
 adb logcat -d -s OpenFlow/MODEL:D | tail -5
 ```
 
