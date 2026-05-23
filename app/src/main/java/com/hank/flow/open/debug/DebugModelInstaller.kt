@@ -26,6 +26,7 @@ object DebugModelInstaller {
             return InstallResult.Skip(target.length())
         }
         return runCatching {
+            if (target.isDirectory) error("Target path is a directory: ${target.absolutePath}")
             target.parentFile?.mkdirs()
             src.copyTo(target, overwrite = true)
             src.delete()  // 不阻断结果；删失败时设备 /data/local/tmp 会留临时文件，下次 push 会覆盖
