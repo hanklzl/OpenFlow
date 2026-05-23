@@ -11,6 +11,26 @@
 
 <!-- next-release -->
 
+## [v0.2.0] - 2026-05-24
+
+### 变更详情
+
+#### 新功能
+- feat(release): 发布流程增加 GPU(Vulkan+OpenCL) 实验包，切版本 v0.2.0 (981d71c)
+
+#### 文档
+- docs(changelog): release v0.1.2 [skip ci] (717e034)
+
+#### 杂项
+- chore(release): merge v0.1.2 bump to main [skip ci] (f40bf17)
+
+### 构建产物
+
+- arm64-v8a: `OpenFlow-v0.2.0-arm64-v8a.apk` · 8.1MB · sha256 `24066915a860`
+- x86_64: `OpenFlow-v0.2.0-x86_64.apk` · 8.4MB · sha256 `74487e3c5c1a`
+- gpu (arm64-v8a, Vulkan+OpenCL): `OpenFlow-v0.2.0-gpu-arm64-v8a.apk` · 30MB · sha256 `c8411a3330a7` (实验性 GPU 包，运行时自动回退 CPU)
+- mapping: `mapping-v0.2.0.zip` · sha256 `12bce1dcdb91` (R8 反混淆用)
+
 ## [v0.1.2] - 2026-05-24
 
 ### 变更详情
