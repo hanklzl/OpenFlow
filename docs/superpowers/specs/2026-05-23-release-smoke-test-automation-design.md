@@ -213,7 +213,7 @@ APK="${APK:-app/build/outputs/apk/release/OpenFlow-arm64-v8a-release.apk}"
 DEVICE=""
 MODELS_DIR="${MODELS_DIR:-$HOME/.openflow-smoke-models}"
 WHISPER="ggml-tiny-q5_1"
-LLM="qwen3-0.6b-instruct-q4_k_m"  # 跟随 ModelCatalog.llmDefault 调整
+LLM="qwen3-0.6b-q4_k_m"  # 跟随 ModelCatalog.llmDefault 调整
 POLISH="true"
 FORCE_REINSTALL="false"
 TIMEOUT=60
@@ -386,7 +386,6 @@ MUST 段从「全链路一次成功」改为「两种走法等效」。
 
 - 不覆盖 UI 全链路（`ACTION_SET_TEXT` 写入第三方 EditText 等纯 UI 路径），手动版仍要保留
 - 模型版本升级时需手动重下到 `~/.openflow-smoke-models/`（或加 `--force-reinstall`）
-- LLM 默认 ID 在 spec 中写作 `qwen3-0.6b-instruct-q4_k_m`，实施期需 verify 与 `ModelCatalog.llmDefault.id` 是否一致；不一致则更新 spec + smoke-test.sh 默认值
 - 接口稳定后可平移 Firebase Test Lab / BrowserStack，本期不做
 
 ## 关联
