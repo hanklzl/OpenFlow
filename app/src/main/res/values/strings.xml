@@ -21,4 +21,11 @@
     <string name="history_polish_label">润色</string>
     <string name="history_raw_text_header">ASR 原文</string>
     <string name="history_duration_ms">%1$d ms</string>
+
+    <string name="settings_dictionary_title">词典</string>
+    <string name="settings_dictionary_description">添加常被识别错的人名、术语、品牌名或项目名；下次识别时会作为 Whisper 上下文提示使用。</string>
+    <string name="settings_dictionary_add_label">词或短语</string>
+    <string name="settings_dictionary_add_action">添加词条</string>
+    <string name="settings_dictionary_remove_action">删除词条</string>
+    <string name="settings_dictionary_empty">暂无词条</string>
 </resources>

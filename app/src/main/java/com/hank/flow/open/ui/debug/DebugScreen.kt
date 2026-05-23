@@ -52,6 +52,7 @@ import com.hank.flow.open.llm.PolishEngine
 import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
 import com.hank.flow.open.model.ModelStore
+import com.hank.flow.open.settings.CustomDictionary
 import com.hank.flow.open.settings.SettingsStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
@@ -105,6 +106,8 @@ fun DebugScreen(modifier: Modifier = Modifier) {
     ) ?: ModelCatalog.llmDefault
     val whisperReady = store.isReady(whisperModel)
     val llmReady = store.isReady(llmModel)
+    val dictionaryEntries = settingsState?.customDictionaryEntries.orEmpty()
+    val dictionaryPrompt = CustomDictionary.toWhisperPrompt(dictionaryEntries)
 
     DisposableEffect(Unit) {
         onDispose {
@@ -226,10 +229,16 @@ fun DebugScreen(modifier: Modifier = Modifier) {
                                         "pcmShorts" to pcm.size,
                                         "fileLen" to (if (whisperFile.exists()) whisperFile.length() else -1L),
                                         "expectedLen" to whisperModel.sizeBytes,
+                                        "dictionaryEntries" to dictionaryEntries.size,
+                                        "dictionaryPromptLen" to (dictionaryPrompt?.length ?: 0),
                                     ),
                                 )
                                 val whisperEngine = WhisperEngine(whisperFile.absolutePath)
-                                val asrResult = whisperEngine.transcribe(pcm, language = "auto")
+                                val asrResult = whisperEngine.transcribe(
+                                    pcm = pcm,
+                                    language = "auto",
+                                    initialPrompt = dictionaryPrompt,
+                                )
                                 rawText = asrResult.text
                                 transcribeLatencyMs = System.currentTimeMillis() - t0
                                 transcribeRunning = false

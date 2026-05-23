@@ -27,6 +27,7 @@ import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
 import com.hank.flow.open.model.ModelEntry
 import com.hank.flow.open.model.ModelStore
+import com.hank.flow.open.settings.CustomDictionary
 import com.hank.flow.open.settings.FlowSettings
 import com.hank.flow.open.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
@@ -184,7 +185,7 @@ class RecordingForegroundService : Service() {
 
                 val settings = settingsStore.current()
                 OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_start")
-                asrResult = transcribe(pcm)
+                asrResult = transcribe(pcm, settings)
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.ASR,
                     "asr_done",
@@ -336,14 +337,15 @@ class RecordingForegroundService : Service() {
         stopSelfSafely()
     }
 
-    private suspend fun transcribe(pcm: ShortArray): WhisperResult {
+    private suspend fun transcribe(pcm: ShortArray, settings: FlowSettings): WhisperResult {
         if (pcm.isEmpty()) {
             OpenFlowLog.d(OpenFlowLog.Tag.ASR, "asr_empty_pcm")
             return WhisperResult("")
         }
-        val engine = ensureWhisperEngine(settingsStore.current())
+        val engine = ensureWhisperEngine(settings)
             ?: return WhisperResult("")
-        return engine.transcribe(pcm, language = "auto")
+        val dictionaryPrompt = CustomDictionary.toWhisperPrompt(settings.customDictionaryEntries)
+        return engine.transcribe(pcm, language = "auto", initialPrompt = dictionaryPrompt)
     }
 
     private suspend fun polish(text: String, llmModelId: String): PolishResult {
@@ -362,10 +364,16 @@ class RecordingForegroundService : Service() {
     private fun ensureWhisperEngine(s: FlowSettings): WhisperEngine? {
         val model = resolveWhisperModel(s)
         val ready = modelStore.isReady(model)
+        val dictionaryPrompt = CustomDictionary.toWhisperPrompt(s.customDictionaryEntries)
         OpenFlowLog.d(
             OpenFlowLog.Tag.ASR,
             "asr_model_check",
-            mapOf("modelId" to model.id, "ready" to ready),
+            mapOf(
+                "modelId" to model.id,
+                "ready" to ready,
+                "dictionaryEntries" to s.customDictionaryEntries.size,
+                "dictionaryPromptLen" to (dictionaryPrompt?.length ?: 0),
+            ),
         )
         if (!ready) {
             Log.w(TAG, "Whisper model not ready: ${model.id}")

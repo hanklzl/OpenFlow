@@ -6,6 +6,8 @@ import com.hank.flow.open.llm.PolishEngine
 import com.hank.flow.open.log.OpenFlowLog
 import com.hank.flow.open.model.ModelCatalog
 import com.hank.flow.open.model.ModelStore
+import com.hank.flow.open.settings.CustomDictionary
+import com.hank.flow.open.settings.SettingsStore
 
 object DebugAssetPipelineRunner {
 
@@ -78,11 +80,17 @@ object DebugAssetPipelineRunner {
             OpenFlowLog.d(OpenFlowLog.Tag.ASR, "debug_asset_abort_no_model")
             return null
         }
+        val dictionaryEntries = SettingsStore(context).current().customDictionaryEntries
+        val dictionaryPrompt = CustomDictionary.toWhisperPrompt(dictionaryEntries)
 
         val whisper = WhisperEngine(whisperFile.absolutePath)
         return try {
             val t0 = System.currentTimeMillis()
-            val result = whisper.transcribe(wav.pcm, language = request.lang)
+            val result = whisper.transcribe(
+                pcm = wav.pcm,
+                language = request.lang,
+                initialPrompt = dictionaryPrompt,
+            )
             val asrMs = System.currentTimeMillis() - t0
             OpenFlowLog.d(
                 OpenFlowLog.Tag.ASR,
@@ -92,6 +100,8 @@ object DebugAssetPipelineRunner {
                     "loadMs" to result.loadMs,
                     "nativeMs" to result.nativeMs,
                     "textLen" to result.text.length,
+                    "dictionaryEntries" to dictionaryEntries.size,
+                    "dictionaryPromptLen" to (dictionaryPrompt?.length ?: 0),
                     "text" to result.text.take(80),
                 ),
             )

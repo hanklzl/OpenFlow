@@ -31,7 +31,8 @@ JNIEXPORT jstring JNICALL
 Java_com_hank_flow_open_asr_WhisperJni_nativeTranscribe(JNIEnv *env, jobject /*thiz*/,
                                                         jlong handle,
                                                         jshortArray jPcm,
-                                                        jstring jLanguage) {
+                                                        jstring jLanguage,
+                                                        jstring jInitialPrompt) {
     auto *ctx = reinterpret_cast<whisper_context *>(handle);
     if (ctx == nullptr) return env->NewStringUTF("");
 
@@ -49,8 +50,15 @@ Java_com_hank_flow_open_asr_WhisperJni_nativeTranscribe(JNIEnv *env, jobject /*t
     }
 
     const char *language = env->GetStringUTFChars(jLanguage, nullptr);
+    const char *initialPrompt = nullptr;
+    if (jInitialPrompt != nullptr) {
+        initialPrompt = env->GetStringUTFChars(jInitialPrompt, nullptr);
+    }
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.language = (std::strcmp(language, "auto") == 0) ? nullptr : language;
+    if (initialPrompt != nullptr && initialPrompt[0] != '\0') {
+        params.initial_prompt = initialPrompt;
+    }
     params.translate = false;
     params.print_progress = false;
     params.print_realtime = false;
@@ -75,6 +83,9 @@ Java_com_hank_flow_open_asr_WhisperJni_nativeTranscribe(JNIEnv *env, jobject /*t
 
     const int rc = whisper_full(ctx, params, samples.data(), static_cast<int>(samples.size()));
     env->ReleaseStringUTFChars(jLanguage, language);
+    if (initialPrompt != nullptr) {
+        env->ReleaseStringUTFChars(jInitialPrompt, initialPrompt);
+    }
 
     if (rc != 0) {
         LOGE("whisper_full failed: %d", rc);

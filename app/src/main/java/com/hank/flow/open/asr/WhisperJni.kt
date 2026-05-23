@@ -23,7 +23,12 @@ object WhisperJni {
     }
 
     external fun nativeInit(modelPath: String): Long
-    external fun nativeTranscribe(handle: Long, pcm16k: ShortArray, language: String): String
+    external fun nativeTranscribe(
+        handle: Long,
+        pcm16k: ShortArray,
+        language: String,
+        initialPrompt: String,
+    ): String
     external fun nativeFree(handle: Long)
 
     private const val TAG = "WhisperJni"

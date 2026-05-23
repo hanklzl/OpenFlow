@@ -48,18 +48,27 @@ class WhisperEngine(private val modelPath: String) {
         ok
     }
 
-    suspend fun transcribe(pcm: ShortArray, language: String = "auto"): WhisperResult {
+    suspend fun transcribe(
+        pcm: ShortArray,
+        language: String = "auto",
+        initialPrompt: String? = null,
+    ): WhisperResult {
         if (!ensureLoaded()) return WhisperResult("", loadMs = lastLoadMs)
         val loadMs = lastLoadMs
         return withContext(Dispatchers.Default) {
             mutex.withLock {
                 val t0 = System.currentTimeMillis()
+                val prompt = initialPrompt.orEmpty()
                 OpenFlowLog.d(
                     OpenFlowLog.Tag.ASR,
                     "whisper_transcribe_call",
-                    mapOf("pcmShorts" to pcm.size, "lang" to language),
+                    mapOf(
+                        "pcmShorts" to pcm.size,
+                        "lang" to language,
+                        "promptLen" to prompt.length,
+                    ),
                 )
-                val out = runCatching { WhisperJni.nativeTranscribe(handle, pcm, language) }
+                val out = runCatching { WhisperJni.nativeTranscribe(handle, pcm, language, prompt) }
                     .getOrElse {
                         Log.e(TAG, "transcribe failed", it)
                         OpenFlowLog.e(OpenFlowLog.Tag.ASR, "whisper_transcribe_failed", it)
