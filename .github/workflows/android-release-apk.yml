@@ -63,7 +63,8 @@ jobs:
       - name: Install Android NDK 29.0.14206865
         run: |
           set -euxo pipefail
-          yes | sdkmanager --install \
+          # `(yes || true)` 吞掉 yes 因 sdkmanager 关闭 stdin 触发的 SIGPIPE，避免 pipefail 假阳性
+          (yes || true) | sdkmanager --install \
             "ndk;29.0.14206865" \
             "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/29.0.14206865" >> "$GITHUB_ENV"
@@ -323,7 +324,9 @@ jobs:
 
       - name: Init gh-pages if missing
         run: |
-          if [ ! -d gh-pages/.git ]; then
+          # actions/checkout continue-on-error 在 gh-pages 不存在时仍会留下空 .git，靠 git rev-parse 校验真假
+          if ! (cd gh-pages 2>/dev/null && git rev-parse --verify gh-pages >/dev/null 2>&1); then
+            rm -rf gh-pages
             git clone --branch main "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
             cd gh-pages
             git checkout --orphan gh-pages
