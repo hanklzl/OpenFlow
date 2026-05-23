@@ -91,11 +91,20 @@ internal object JniLlamaBridge : LlamaBridge {
     override fun init(modelPath: String, ctxSize: Int, nGpuLayers: Int, backendName: String?): Long =
         LlamaJni.nativeInit(modelPath, ctxSize, nGpuLayers, backendName)
 
-    override fun supportsGpuOffload(): Boolean =
-        runCatching { LlamaJni.nativeSupportsGpuOffload() }.getOrDefault(false)
+    // Touching LlamaJni.loaded (-> WhisperJni.loaded) forces WhisperJni's init
+    // block to run System.loadLibrary("openflow_jni"). Without this guard the
+    // settings-screen GPU probe runs before any model/ASR has loaded the lib,
+    // so these native calls throw UnsatisfiedLinkError, get swallowed, and the
+    // backend is misreported as "no GPU device available".
+    override fun supportsGpuOffload(): Boolean {
+        if (!loaded) return false
+        return runCatching { LlamaJni.nativeSupportsGpuOffload() }.getOrDefault(false)
+    }
 
-    override fun listBackendDevices(): String =
-        runCatching { LlamaJni.nativeListBackendDevices() }.getOrDefault("")
+    override fun listBackendDevices(): String {
+        if (!loaded) return ""
+        return runCatching { LlamaJni.nativeListBackendDevices() }.getOrDefault("")
+    }
 
     override fun generate(handle: Long, prompt: String, maxNewTokens: Int, temperature: Float, topP: Float): String =
         LlamaJni.nativeGenerate(handle, prompt, maxNewTokens, temperature, topP)

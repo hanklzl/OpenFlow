@@ -1,6 +1,6 @@
 #include <jni.h>
 #include <android/log.h>
-#include <llama.h>
+#include <llama.h>  // transitively provides ggml.h + ggml-backend.h (ggml_log_set, ggml_backend_*)
 #include <string>
 #include <vector>
 #include <cstring>
@@ -30,6 +30,28 @@ struct PrefixCache {
 };
 
 bool gBackendInitialized = false;
+
+// Diagnostic: ggml/llama emit their backend-init diagnostics
+// (e.g. "ggml_vulkan: No devices found", "ggml_opencl: could find any OpenCL
+// devices", Vulkan version/feature errors) through the default log callback,
+// which writes to stderr and is silently dropped on Android. Bridge them to
+// logcat under the GGML tag so GPU enumeration failures are actually visible.
+void ggmlLogToAndroid(ggml_log_level level, const char *text, void * /*user_data*/) {
+    int prio = level == GGML_LOG_LEVEL_ERROR ? ANDROID_LOG_ERROR
+             : level == GGML_LOG_LEVEL_WARN  ? ANDROID_LOG_WARN
+                                             : ANDROID_LOG_INFO;
+    __android_log_print(prio, "GGML", "%s", text != nullptr ? text : "");
+}
+
+void ensureNativeLogBridge() {
+    static bool installed = false;
+    if (installed) {
+        return;
+    }
+    installed = true;
+    ggml_log_set(ggmlLogToAndroid, nullptr);
+    llama_log_set(ggmlLogToAndroid, nullptr);
+}
 
 long long nowMs() {
     using namespace std::chrono;
@@ -138,6 +160,7 @@ JNIEXPORT jlong JNICALL
 Java_com_hank_flow_open_llm_LlamaJni_nativeInit(JNIEnv *env, jobject /*thiz*/,
                                                 jstring jModelPath, jint ctxSize,
                                                 jint nGpuLayers, jstring jBackendName) {
+    ensureNativeLogBridge();
     if (!gBackendInitialized) {
         llama_backend_init();
         gBackendInitialized = true;
@@ -215,8 +238,28 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeSupportsGpuOffload(JNIEnv * /*env*/, 
 
 JNIEXPORT jstring JNICALL
 Java_com_hank_flow_open_llm_LlamaJni_nativeListBackendDevices(JNIEnv *env, jobject /*thiz*/) {
+    ensureNativeLogBridge();
     ggml_backend_load_all();
+
+    // Diagnostic: dump which backends actually registered and how many devices
+    // each enumerated. Lets us tell "backend not compiled/registered into the
+    // .so" (reg name absent) apart from "backend ran but found 0 GPU devices"
+    // (reg present, dev count 0 — see the GGML tag for the underlying reason).
+    const size_t regCount = ggml_backend_reg_count();
+    LOGI("backend diag: %zu registries compiled in", regCount);
+    for (size_t i = 0; i < regCount; ++i) {
+        ggml_backend_reg_t reg = ggml_backend_reg_get(i);
+        if (reg == nullptr) {
+            continue;
+        }
+        const char *regName = ggml_backend_reg_name(reg);
+        LOGI("backend diag: reg[%zu] name=%s devices=%zu",
+             i, regName != nullptr ? regName : "(null)",
+             ggml_backend_reg_dev_count(reg));
+    }
+
     const size_t total = ggml_backend_dev_count();
+    LOGI("backend diag: %zu total devices across all registries", total);
     std::string out;
     for (size_t i = 0; i < total; ++i) {
         ggml_backend_dev_t dev = ggml_backend_dev_get(i);
@@ -229,6 +272,8 @@ Java_com_hank_flow_open_llm_LlamaJni_nativeListBackendDevices(JNIEnv *env, jobje
         const char *typeName = type == GGML_BACKEND_DEVICE_TYPE_CPU
                                    ? "cpu"
                                    : (type == GGML_BACKEND_DEVICE_TYPE_IGPU ? "igpu" : "gpu");
+        LOGI("backend diag: dev[%zu] name=%s desc=%s type=%s",
+             i, name.c_str(), desc.c_str(), typeName);
         if (!out.empty()) {
             out += "\n";
         }
